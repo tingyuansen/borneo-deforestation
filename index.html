@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Borneo, in pixels · Sarawak deforestation on the globe</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<style>
+  :root {
+    --ink:      #1b1712;
+    --paper:    #f4ede1;
+    --paper-2:  #ebe1cf;
+    --rule:     rgba(244,237,225,0.12);
+    --rule-2:   rgba(244,237,225,0.20);
+    --muted:    #8a7a60;
+    --ochre:    #c67b2f;
+    --amber:    #d68926;
+    --rust:     #a03a1f;
+    --canopy:   #3f7a3a;
+    --sky:      #5ab0c4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0a0806; color: var(--paper);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .serif { font-family: 'Fraunces', Georgia, serif; }
+  .mono  { font-family: 'JetBrains Mono', monospace; }
+
+  /* Deep-space backdrop */
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(ellipse at 50% 55%, #1a1510 0%, #0a0806 60%, #000 100%);
+  }
+
+  /* ═════════════ Globe canvas ═════════════ */
+  #globe-mount {
+    position: fixed; inset: 0; z-index: 1;
+  }
+  #globe-mount canvas { display: block; }
+
+  /* ═════════════ HUD ═════════════ */
+  .hud { position: fixed; z-index: 10; color: var(--paper); }
+
+  /* Top-left: title block */
+  .hud-title {
+    top: 28px; left: 32px; max-width: 420px; pointer-events: none;
+  }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: #e7c798;
+    border-left: 2px solid var(--ochre); padding-left: 10px;
+  }
+  .kicker .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ochre);
+    box-shadow: 0 0 10px var(--ochre); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .hud-title h1 {
+    font-family: 'Fraunces', serif; font-weight: 400;
+    font-size: clamp(26px, 2.6vw, 38px); line-height: 1.06;
+    letter-spacing: -0.02em; margin: 14px 0 0; text-wrap: balance;
+  }
+  .hud-title h1 em { font-style: italic; color: #e7b984; font-weight: 300; }
+  .hud-title p {
+    font-family: 'Fraunces', serif; font-style: italic;
+    color: #cfbe98; font-size: 14.5px; line-height: 1.5;
+    margin: 10px 0 0; max-width: 38ch;
+  }
+  .hud-title .provenance {
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid rgba(244,237,225,0.10);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.14em; line-height: 1.55;
+    color: var(--muted); text-transform: none;
+    max-width: 42ch;
+  }
+  .hud-title .provenance b {
+    color: #e7c798; font-weight: 500; letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+
+  /* Top-right stats on globe; bottom-right above timeline in tile view */
+  .hud-stats {
+    top: 28px; right: 32px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 14px;
+  }
+  .stat-card {
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2);
+    padding: 12px 16px; border-radius: 2px;
+    min-width: 170px;
+    text-align: right;
+  }
+  .stat-card .num {
+    font-family: 'Fraunces', serif; font-weight: 500; font-size: 28px;
+    line-height: 1; color: var(--paper); letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-card .lbl {
+    font-family: 'Inter', sans-serif; font-size: 11.5px; color: #cfbe98;
+    margin-top: 6px; letter-spacing: 0.03em;
+  }
+  .stat-card .sub {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--muted); margin-top: 4px; letter-spacing: 0.08em;
+  }
+
+  /* Left rail: category toggles + instructions.
+     On the globe, the bottom timeline is hidden, so anchor these near the
+     bottom. In the tile view, the timeline is visible, so lift them above it. */
+  .hud-left {
+    left: 32px; bottom: 32px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .cat-chip {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 9px 14px 9px 12px; border-radius: 999px; cursor: pointer;
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2); color: var(--paper);
+    font-size: 13px; transition: all 0.15s ease;
+    min-width: 190px; user-select: none;
+  }
+  .cat-chip:hover { border-color: #e7c798; }
+  .cat-chip .sw { width: 10px; height: 10px; border-radius: 50%;
+    box-shadow: 0 0 8px currentColor; }
+  .cat-chip .lbl { flex: 1; }
+  .cat-chip .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98; }
+  .cat-chip.off { opacity: 0.35; }
+  .cat-chip.deforestation .sw { background: #e0553a; color: #e0553a; }
+  .cat-chip.oilpalm       .sw { background: #e09550; color: #e09550; }
+  .cat-chip.regrowth      .sw { background: #6fbf5c; color: #6fbf5c; }
+
+  .how {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--muted); line-height: 1.9;
+    padding: 14px 16px; border: 1px dashed var(--rule-2); border-radius: 2px;
+    max-width: 220px; background: rgba(12,9,6,0.35);
+  }
+  .how .k {
+    display: inline-block; padding: 2px 6px; border-radius: 2px;
+    background: rgba(244,237,225,0.08); color: var(--paper);
+    margin-right: 4px; font-size: 10px;
+  }
+
+  /* Right rail: action buttons. Anchored near bottom on globe; lifted
+     above the timeline when the tile view is open. */
+  .hud-right {
+    right: 32px; bottom: 32px; display: flex; flex-direction: column; gap: 10px;
+    align-items: flex-end;
+  }
+  .btn {
+    appearance: none; border: 1px solid var(--rule-2);
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(8px);
+    color: var(--paper); cursor: pointer;
+    padding: 10px 16px; border-radius: 999px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 10px;
+    transition: all 0.15s ease; min-width: 170px; justify-content: flex-start;
+  }
+  .btn:hover { border-color: #e7c798; color: #fff; }
+  .btn.primary {
+    background: var(--ochre); color: #1b1712; border-color: var(--ochre);
+    box-shadow: 0 8px 24px rgba(198,123,47,0.25);
+  }
+  .btn.primary:hover { background: var(--amber); border-color: var(--amber); color: #1b1712; }
+  .btn .ic { width: 16px; height: 16px; flex-shrink: 0; }
+  .btn .tri {
+    width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 8px solid currentColor;
+  }
+  .btn.playing .tri {
+    width: 9px; height: 10px; border: none; background: transparent;
+    border-left: 3px solid currentColor; border-right: 3px solid currentColor;
+  }
+
+  /* Bottom bar: timeline scrubber (stacked histogram + brush) */
+  .hud-bottom {
+    left: 0; right: 0; bottom: 0;
+    padding: 18px 40px 26px;
+    background: linear-gradient(to top, rgba(8,6,4,0.96) 20%, rgba(10,8,6,0.55) 70%, rgba(10,8,6,0));
+  }
+  .timeline-head {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 14px; gap: 24px;
+  }
+  .timeline-head .title-block .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted);
+    display: block; margin-bottom: 4px;
+  }
+  .timeline-head .title-block .title {
+    font-family: 'Fraunces', serif; font-size: 18px; font-style: italic;
+    color: #f4ede1; line-height: 1.1;
+  }
+  .timeline-head .range {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--muted); letter-spacing: 0.08em; text-align: right;
+  }
+  .timeline-head .range .v {
+    color: #e7c798; font-size: 14px;
+    display: block; margin-bottom: 2px; letter-spacing: 0.04em;
+  }
+  .timeline-head .range .hint {
+    font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.7;
+  }
+  #hist-svg { display: block; width: 100%; height: 92px; overflow: visible; }
+  .hist-area { mix-blend-mode: screen; }
+  .hist-tick-line { stroke: rgba(244,237,225,0.05); stroke-dasharray: 1 2; }
+  .hist-baseline { stroke: rgba(244,237,225,0.22); stroke-width: 1; }
+  .hist-year-tick { fill: var(--muted); font-size: 10px;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.14em;
+    text-transform: uppercase; }
+  .hist-year-major { fill: #e7c798; }
+  /* Time-range selection — no box. Outside the selection is dimmed by
+     two fade rects the draw() function paints; the selection itself is
+     transparent, with a soft glowing edge-line on each side. */
+  .brush .selection {
+    fill: transparent;
+    stroke: #e7c798; stroke-width: 0;   /* edges drawn manually */
+  }
+  .brush .handle { fill: transparent; }
+  .brush .overlay { cursor: crosshair; fill: transparent; }
+  .hist-dim { fill: rgba(12,9,6,0.55); pointer-events: none; }
+  /* Chunky white vertical handle on each brush edge — mirrors the before/after
+     slider handle so the interaction reads the same. */
+  .hist-edge {
+    stroke: rgba(244,237,225,0.92); stroke-width: 2;
+    pointer-events: none;
+  }
+  .hist-edge-grip {
+    fill: rgba(20,16,12,0.92);
+    stroke: rgba(244,237,225,0.92); stroke-width: 1.5;
+    pointer-events: none;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5));
+  }
+  .hist-edge-grip-glyph {
+    fill: var(--paper);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.04em; pointer-events: none;
+    dominant-baseline: central; text-anchor: middle;
+  }
+
+  /* Zoom indicator (left side of bottom bar) */
+  .zoom-indicator {
+    position: absolute; left: 32px; bottom: 148px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    color: var(--muted); letter-spacing: 0.1em;
+    display: flex; gap: 10px; align-items: center;
+  }
+  .zoom-indicator .bar {
+    width: 140px; height: 3px; background: rgba(244,237,225,0.1);
+    border-radius: 2px; overflow: hidden; position: relative;
+  }
+  .zoom-indicator .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(to right, var(--ochre), #e7c798);
+    width: 10%; transition: width 0.2s ease;
+  }
+
+  /* Tooltip */
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 30;
+    background: rgba(12,9,6,0.92); color: var(--paper);
+    border: 1px solid var(--rule-2); border-radius: 2px;
+    padding: 10px 14px; font-size: 12.5px; line-height: 1.5;
+    visibility: hidden; max-width: 280px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  }
+  #tooltip .t-head {
+    font-family: 'Fraunces', serif; font-size: 14px; margin-bottom: 4px;
+  }
+  #tooltip .t-meta { font-family: 'JetBrains Mono', monospace;
+    color: #cfbe98; font-size: 11px; letter-spacing: 0.04em; }
+
+  /* Inspector (pinned on click) */
+  #inspector {
+    position: fixed; z-index: 35; pointer-events: auto;
+    background: rgba(12,9,6,0.96); color: var(--paper);
+    border: 1px solid #e7c798; border-radius: 3px;
+    padding: 14px 16px; font-size: 12.5px; line-height: 1.6;
+    max-width: 280px; visibility: hidden;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+  }
+  #inspector .ins-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin-bottom: 8px;
+  }
+  #inspector .ins-head .t { font-family: 'Fraunces', serif; font-size: 17px; font-style: italic; color: #e7c798; }
+  #inspector .ins-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 0; }
+  #inspector .row { display: flex; justify-content: space-between; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98; letter-spacing: 0.04em; }
+  #inspector .row .k { color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; font-size: 10px; }
+  #inspector .row .v { color: var(--paper); }
+  #inspector .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+
+  /* Drawer — UMAP + before/after (opens from bottom on user request) */
+  #drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    height: 58vh; background: rgba(12,9,6,0.96);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--rule-2);
+    transform: translateY(100%); transition: transform 0.45s cubic-bezier(.2,.7,.2,1);
+    display: flex; flex-direction: column;
+  }
+  #drawer.open { transform: translateY(0); }
+  .drawer-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 32px; border-bottom: 1px solid var(--rule);
+    flex-shrink: 0;
+  }
+  .drawer-head .title {
+    font-family: 'Fraunces', serif; font-size: 18px; color: var(--paper);
+  }
+  .drawer-head .title em { color: #e7c798; font-style: italic; font-weight: 400; }
+  .drawer-close {
+    background: none; border: 1px solid var(--rule-2); color: var(--paper);
+    padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+  .drawer-close:hover { border-color: #e7c798; }
+  .drawer-body {
+    flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--rule); min-height: 0;
+  }
+  .drawer-panel {
+    background: rgba(20,16,12,0.98);
+    padding: 18px 22px; display: flex; flex-direction: column; min-height: 0;
+  }
+  .drawer-panel h3 {
+    font-family: 'Fraunces', serif; font-weight: 500; font-size: 15px;
+    margin: 0 0 6px; color: var(--paper);
+  }
+  .drawer-panel .sub {
+    font-family: 'Fraunces', serif; font-style: italic; font-size: 12.5px;
+    color: #cfbe98; margin-bottom: 12px;
+  }
+  .drawer-panel .stack { position: relative; flex: 1; min-height: 0; }
+  .drawer-panel .stack canvas, .drawer-panel .stack svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+  }
+  .drawer-panel .stack canvas { pointer-events: none; }
+  .axis-dark text { fill: #a99573; }
+  .axis-dark line, .axis-dark path { stroke: rgba(244,237,225,0.15); }
+
+  /* Before/after drawer panel */
+  .ba-wrap { position: relative; flex: 1; min-height: 0; border: 1px solid var(--rule-2); overflow: hidden; cursor: ew-resize; user-select: none; border-radius: 2px; }
+  .ba-before-canvas, .ba-after-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ba-after { position: absolute; inset: 0; }
+  .ba-handle {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--paper);
+    transform: translateX(-50%); box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  .ba-handle::before {
+    content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--paper); border: 1.5px solid var(--ink);
+    top: calc(50% - 16px);
+  }
+  /* Tweaks floating */
+  #tweaks {
+    position: fixed; bottom: 170px; right: 220px; z-index: 40;
+    background: rgba(12,9,6,0.92); backdrop-filter: blur(10px);
+    border: 1px solid var(--rule-2); border-radius: 3px;
+    padding: 14px 16px; width: 250px; display: none;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  }
+  #tweaks.visible { display: block; }
+  #tweaks h3 { margin: 0 0 10px; font-family: 'Fraunces', serif;
+    font-weight: 500; font-size: 15px; display: flex; justify-content: space-between; align-items: center; color: var(--paper); }
+  #tweaks h3 .chip { font-family: 'JetBrains Mono', monospace; font-size: 9px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: #e7c798; }
+  .tw-row { display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 0; border-top: 1px dashed var(--rule-2); font-size: 12.5px; color: #cfbe98; }
+  .tw-row:first-of-type { border-top: none; }
+  .tw-row select, .tw-row input {
+    font-family: 'Inter', sans-serif; font-size: 12px;
+    border: 1px solid var(--rule-2); background: rgba(244,237,225,0.05);
+    padding: 4px 8px; border-radius: 2px; color: var(--paper);
+  }
+  .tw-row input[type=checkbox] { accent-color: var(--ochre); width: 15px; height: 15px; }
+
+  /* ─── 2D tile view (takes over at max zoom) ─── */
+  #tile-view {
+    position: fixed; inset: 0; z-index: 5;
+    background: #0a0806;
+    transition: opacity 0.5s ease;
+  }
+  #tile-map-pane { position: absolute; inset: 0; }
+
+  /* Floating analysis panels. UMAP is a translucent inset at top-right
+     (stacked below the stats cards). Before/after is baked into the
+     bottom-left as a permanent panel (not a floating card). */
+  .inset-card {
+    position: fixed; z-index: 12;
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(14px);
+    border: 1px solid rgba(244,237,225,0.08); border-radius: 2px;
+    padding: 14px 16px;
+    box-shadow: 0 10px 36px rgba(0,0,0,0.35);
+  }
+  .inset-card .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+  }
+  .inset-card h3 {
+    font-family: 'Fraunces', serif; font-weight: 500; font-size: 14px;
+    margin: 4px 0 2px; color: var(--paper);
+  }
+  .inset-card h3 em { color: #e7c798; font-style: italic; font-weight: 400; }
+  .inset-card .sub {
+    font-family: 'Fraunces', serif; font-style: italic; font-size: 11.5px;
+    color: #cfbe98; margin-bottom: 8px; line-height: 1.35;
+  }
+  /* UMAP inset — top-right corner, more translucent than other panels */
+  #umap-inset {
+    top: 28px; right: 32px; width: 300px;
+    display: none;
+    background: rgba(12,9,6,0.32);
+    backdrop-filter: blur(22px) saturate(1.1);
+    border-color: rgba(244,237,225,0.06);
+    box-shadow: 0 10px 32px rgba(0,0,0,0.28);
+  }
+  body.in-tile-view #umap-inset { display: block; }
+  #umap-inset .stack { position: relative; height: 200px; }
+  #umap-inset .stack canvas,
+  #umap-inset .stack svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+  }
+  #umap-inset .stack canvas { pointer-events: none; }
+  /* Box-select on UMAP — style d3-brush selection to match the rest of the HUD */
+  #umap-inset .brush .selection {
+    fill: rgba(231,199,152,0.10); stroke: #e7c798; stroke-width: 1;
+    stroke-dasharray: 3 3; shape-rendering: crispEdges;
+  }
+  #umap-inset .brush .handle { fill: transparent; }
+  #umap-inset .brush-hint {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--muted); margin-top: 4px; display: flex; justify-content: space-between;
+  }
+  #umap-inset .brush-hint a {
+    color: #e7c798; cursor: pointer; text-decoration: none;
+    border-bottom: 1px dotted rgba(231,199,152,0.4);
+  }
+  #umap-inset .brush-hint a.inactive { opacity: 0.35; pointer-events: none; }
+
+  /* Before/after — baked into the map as a full-height vertical split.
+     The "before" canvas fills the map pane; a draggable vertical bar
+     reveals the "after" (with detection dots burned in) on the right. */
+  #ba-inset {
+    position: absolute; inset: 0; z-index: 2;
+    pointer-events: none;       /* only handle takes pointer */
+    display: none;
+  }
+  body.in-tile-view #ba-inset { display: block; }
+  #ba-inset .ba-wrap {
+    position: absolute; inset: 0;
+    overflow: hidden; user-select: none;
+  }
+  #ba-inset .ba-before-canvas,
+  #ba-inset .ba-after-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: none;             /* hidden — the map is the "before" */
+  }
+  /* Before/after split, commercial-style. Both halves show the same
+     satellite basemap; the LEFT ("before") is dimmed with a translucent
+     wash so the state is legible. Detection dots still paint only on the
+     RIGHT ("after") half (see window.__baSplitX). Clip-path is set by JS. */
+  #ba-inset .ba-after {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: rgba(8, 6, 4, 0.42);
+  }
+  #ba-inset .ba-handle {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: rgba(244,237,225,0.92);
+    transform: translateX(-50%);
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 0 18px rgba(231,199,152,0.35);
+    pointer-events: auto; cursor: ew-resize;
+    z-index: 4;
+  }
+  #ba-inset .ba-handle::before {
+    content: ''; position: absolute; left: 50%; top: calc(50% - 18px);
+    transform: translateX(-50%);
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(20,16,12,0.92); border: 1.5px solid rgba(244,237,225,0.92);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  }
+  #ba-inset .ba-handle::after {
+    content: '‹ ›'; position: absolute; left: 50%; top: calc(50% - 18px);
+    transform: translateX(-50%); width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--paper); font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; letter-spacing: 0.05em; pointer-events: none;
+  }
+  #tile-view.hidden { opacity: 0; pointer-events: none; }
+  /* When in the 2D tile view, dim the globe-specific chrome so the reader
+     focuses on the satellite map. Some pieces (timeline, stats, categories)
+     stay because they still apply. */
+  body.in-tile-view .hud-title,
+  body.in-tile-view .how,
+  body.in-tile-view .zoom-indicator { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+  /* Timeline, stats, and play button live INSIDE the tile view only. */
+  .hud-bottom, .hud-stats { opacity: 0; pointer-events: none; transition: opacity 0.35s ease; }
+  body.in-tile-view .hud-bottom,
+  body.in-tile-view .hud-stats { opacity: 1; pointer-events: auto; }
+  /* In tile view, stats move to bottom-right above the timeline */
+  body.in-tile-view .hud-stats { top: auto; bottom: 160px; right: 32px; }
+  /* On the globe, only "Fly to Sarawak" is visible in the right rail.
+     In the tile view, only "Play timeline" is visible (fly is redundant).
+     Right rail gets lifted above the bottom timeline inside tile view. */
+  body:not(.in-tile-view) #play-btn { display: none; }
+  body.in-tile-view #fly-btn { display: none; }
+  body.in-tile-view .hud-left { bottom: 170px; transition: bottom 0.35s ease; }
+  body.in-tile-view .hud-right { bottom: 170px; transition: bottom 0.35s ease; }
+  #tile-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #tile-canvas:active { cursor: grabbing; }
+  #tile-hud {
+    position: absolute; top: 22px; left: 24px;
+    display: flex; gap: 16px; align-items: flex-start; z-index: 2;
+  }
+  .back-btn {
+    background: rgba(12,9,6,0.75); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2); color: var(--paper);
+    padding: 10px 16px 10px 12px; border-radius: 999px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .back-btn:hover { border-color: #e7c798; color: #e7c798; }
+  .tile-coord {
+    background: rgba(12,9,6,0.7); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2); padding: 10px 14px;
+    border-radius: 2px;
+  }
+  .coord-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+  }
+  .coord-val {
+    font-family: 'Fraunces', serif; font-size: 14px; color: var(--paper);
+    margin-top: 3px; letter-spacing: 0.01em;
+  }
+  .coord-hint {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    margin-top: 6px; opacity: 0.65;
+  }
+
+  /* Loading curtain */
+  #loader {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 18px;
+    background: #0a0806;
+    transition: opacity 0.8s ease;
+  }
+  #loader.gone { opacity: 0; pointer-events: none; }
+  #loader .ring {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 2px solid rgba(244,237,225,0.15);
+    border-top-color: var(--ochre);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loader .msg {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--muted); letter-spacing: 0.22em; text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div id="loader">
+  <div class="ring"></div>
+  <div class="msg">Loading 47,126 pixels · Borneo rising</div>
+</div>
+
+<div id="globe-mount"></div>
+<div id="tile-view" class="hidden">
+  <div id="tile-map-pane">
+    <canvas id="tile-canvas"></canvas>
+    <!-- Baked-in before/after slider — sits above the tile canvas, inside
+         the tile pane so z-indexing works and pointer events reach it. -->
+    <div id="ba-inset">
+      <div class="ba-wrap" id="ba-wrap">
+        <div class="ba-after"></div>
+        <div class="ba-handle"></div>
+      </div>
+    </div>
+    <div id="tile-hud">
+      <button id="back-to-globe" class="back-btn">
+        <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4 L6 10 L12 16"/></svg>
+        Back to globe
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- UMAP inset (top-right, translucent) — only visible in tile view -->
+<div id="umap-inset" class="inset-card">
+  <div class="eyebrow">Pixel similarity · UMAP</div>
+  <h3>How similar are the <em>changes?</em></h3>
+  <div class="sub">Each dot = one changed pixel, placed by multi-band similarity.</div>
+  <div class="stack">
+    <canvas id="umap-canvas"></canvas>
+    <svg id="umap-svg"></svg>
+  </div>
+  <div class="brush-hint">
+    <span>drag to lasso a cluster</span>
+    <a id="umap-clear" class="inactive">clear</a>
+  </div>
+</div>
+<!-- HUD: title -->
+<div class="hud hud-title">
+  <span class="kicker"><span class="dot"></span>A decade of forest change · on the globe</span>
+  <h1>Borneo, <em>in pixels.</em></h1>
+  <p>Every dot is one Sentinel-2 satellite pixel where the rainforest canopy of northern Sarawak suddenly changed between 2015 and 2024. Drag, zoom, scrub.</p>
+  <div class="provenance">
+    <b>Public data only.</b> No sensitive or proprietary information. Imagery derived from ESA/Copernicus Sentinel-2 (open licence); basemap tiles from Esri World Imagery.
+  </div>
+</div>
+
+<!-- HUD: stats -->
+<div class="hud hud-stats">
+  <div class="stat-card">
+    <div class="num" id="stat-ha">—</div>
+    <div class="lbl">hectares of canopy lost</div>
+    <div class="sub" id="stat-ha-sub">pilot · 10 × 10 km</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" id="stat-pix">—</div>
+    <div class="lbl">changed pixels detected</div>
+    <div class="sub">2015-11-26 → 2024-12-28</div>
+  </div>
+</div>
+
+<!-- HUD: left rail (filters + how-to) -->
+<div class="hud hud-left">
+  <div class="cat-chip deforestation" data-cat="deforestation"><span class="sw"></span><span class="lbl">Deforestation</span><span class="count" id="ct-deforestation"></span></div>
+  <div class="cat-chip oilpalm" data-cat="oilpalm"><span class="sw"></span><span class="lbl">Oil-palm conversion</span><span class="count" id="ct-oilpalm"></span></div>
+  <div class="cat-chip regrowth" data-cat="regrowth"><span class="sw"></span><span class="lbl">Reforestation</span><span class="count" id="ct-regrowth"></span></div>
+  <div class="how">
+    <div><span class="k">drag</span>rotate</div>
+    <div><span class="k">wheel</span>zoom</div>
+    <div><span class="k">hover</span>inspect pixel</div>
+  </div>
+  <button class="btn" id="play-btn">
+    <span class="tri"></span><span class="lbl">Play timeline</span>
+  </button>
+</div>
+
+<!-- Zoom indicator -->
+<div class="zoom-indicator">
+  <span>ZOOM</span>
+  <div class="bar"><div class="fill" id="zoom-fill"></div></div>
+  <span id="zoom-label">space</span>
+</div>
+
+<!-- HUD: right rail (actions) -->
+<div class="hud hud-right">
+  <button class="btn primary" id="fly-btn">
+    <svg class="ic" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg>
+    Fly in to Baram, Sarawak
+  </button>
+</div>
+
+<!-- Bottom timeline bar -->
+<div class="hud hud-bottom">
+  <div class="timeline-head">
+    <div class="title-block">
+      <span class="eyebrow">Timeline · stacked by category</span>
+      <span class="title">When each change happened</span>
+    </div>
+    <div class="range">
+      <span class="v" id="range-label">all dates</span>
+      <span class="hint">drag to scrub · click outside to clear</span>
+    </div>
+  </div>
+  <svg id="hist-svg"></svg>
+</div>
+
+<!-- Drawer (deprecated — kept hidden; content now lives in tile view) -->
+<div id="drawer" style="display:none"></div>
+
+<!-- Tweaks -->
+<div id="tweaks">
+  <h3>Tweaks <span class="chip">live</span></h3>
+  <div class="tw-row"><label>Show overlays</label><input type="checkbox" id="tw-overlays" checked></div>
+  <div class="tw-row"><label>Auto-rotate</label><input type="checkbox" id="tw-autorot" checked></div>
+  <div class="tw-row"><label>Dot sizing</label>
+    <select id="tw-dotsize">
+      <option value="recency">Scaled by recency</option>
+      <option value="uniform">Uniform</option>
+    </select>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+<div id="inspector">
+  <div class="ins-head">
+    <div class="t" id="ins-title">—</div>
+    <button class="ins-close" id="ins-close">✕</button>
+  </div>
+  <div class="row"><span class="k">When</span><span class="v" id="ins-when">—</span></div>
+  <div class="row"><span class="k">Where</span><span class="v" id="ins-where">—</span></div>
+  <div class="row"><span class="k">ΔNDVI</span><span class="v" id="ins-ndvi">—</span></div>
+  <div class="row"><span class="k">Ground</span><span class="v">≈ 400 m² (20 m pixel)</span></div>
+</div>
+
+<script src="globe.js"></script>
+<script src="tile-view.js"></script>
+<script>
+/* ═════════════ Data constants ═════════════ */
+const BUCKET_COLOR = {
+  deforestation: '#d94f35',  // deep cinnabar — reads over forest green
+  oilpalm:       '#e0a25c',  // warm ochre — distinct from both red & green
+  regrowth:      '#7fbf86',  // sage green — soft, not neon
+};
+function bucketOf(d) {
+  // Fast path: decoder pre-computes this as a single byte. Fallback keeps
+  // the predicate working for any legacy paths that might mutate records.
+  if (d._b !== undefined) return BUCKET_NAMES[d._b];
+  return d.n > 0.05 ? 'regrowth' : d.n < -0.27 ? 'deforestation' : 'oilpalm';
+}
+
+/* ═════════════ Load data ═════════════ */
+const P = name => `data/${name}`;
+let DATA, MANIFEST;
+let globe;
+
+// Decode base64 → typed array view of the given ctor (Float32Array, Uint8Array...)
+function b64ToTyped(str, Ctor) {
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Ctor(bytes.buffer, bytes.byteOffset, bytes.byteLength / Ctor.BYTES_PER_ELEMENT);
+}
+
+// Reconstitute the packed detections file into the same array-of-objects
+// shape the rest of the app expects. ~14× smaller over the wire, and
+// avoids JSON-parsing 47k individual objects.
+function decodeDetections(packed) {
+  const xyd = b64ToTyped(packed.xyd, Float32Array);
+  const uu  = b64ToTyped(packed.uu,  Float32Array);
+  const nn  = b64ToTyped(packed.nn,  Float32Array);
+  const bb  = b64ToTyped(packed.bb,  Uint8Array);
+  const N = packed.count;
+  const out = new Array(N);
+  for (let i = 0; i < N; i++) {
+    out[i] = {
+      x: xyd[i*3], y: xyd[i*3+1], d: xyd[i*3+2],
+      ux: uu[i*2], uy: uu[i*2+1],
+      n: nn[i],
+      // bucket/color cached here so bucketOf() is O(1) and we stop allocating
+      // colors and running the predicate hundreds of thousands of times.
+      _b: bb[i],
+    };
+  }
+  return out;
+}
+
+// Fast bucket from the cached byte (0=deforest, 1=oilpalm, 2=regrowth).
+const BUCKET_NAMES = ['deforestation','oilpalm','regrowth'];
+
+Promise.all([
+  fetch(P('manifest.json')).then(r=>r.json()),
+  fetch(P('detections.packed.json')).then(r=>r.json()),
+]).then(([manifest, packed]) => {
+  MANIFEST = manifest;
+  DATA = decodeDetections(packed);
+  boot();
+});
+
+function boot() {
+  /* Prepare point array for globe.
+     On the globe, 47k dots is fine but we lightly jitter them so they
+     don't all stack into a single texel at low zoom. */
+  const pts = DATA.map(d => ({
+    lon: d.x, lat: d.y,
+    day: d.d,
+    bucket: bucketOf(d),
+    color: BUCKET_COLOR[bucketOf(d)],
+    size: recencySize(d),
+    d,
+  }));
+
+  globe = Globe.init(document.getElementById('globe-mount'), {
+    onReady: () => document.getElementById('loader').classList.add('gone'),
+  });
+  globe.setPoints(pts);
+  globe.setPilotBox(MANIFEST.bbox);
+
+  // Initial camera: look at earth with Sarawak visible
+  globe.flyTo(114.05, 4.05, 3.2, 0);
+
+  // Stats
+  const lost = DATA.filter(d => bucketOf(d)==='deforestation' || bucketOf(d)==='oilpalm').length;
+  const lostHa = (lost * 0.04).toFixed(0);
+  const pilotHa = 10000;
+  const pct = (lost * 0.04 / pilotHa * 100).toFixed(1);
+  document.getElementById('stat-ha').textContent = Number(lostHa).toLocaleString();
+  document.getElementById('stat-ha-sub').textContent = `${pct}% of the 10×10 km tile`;
+  document.getElementById('stat-pix').textContent = MANIFEST.n_detections.toLocaleString();
+
+  // Category counts
+  const counts = {deforestation:0,oilpalm:0,regrowth:0};
+  for (const d of DATA) counts[bucketOf(d)]++;
+  for (const k in counts) document.getElementById(`ct-${k}`).textContent = counts[k].toLocaleString();
+
+  // Wire chips
+  const hiddenCats = new Set();
+  document.querySelectorAll('.cat-chip').forEach(el => {
+    el.addEventListener('click', () => {
+      const c = el.dataset.cat;
+      if (hiddenCats.has(c)) hiddenCats.delete(c); else hiddenCats.add(c);
+      el.classList.toggle('off');
+      applyFilter();
+    });
+  });
+
+  // Filter state
+  const state = {
+    tRange: [MANIFEST.t_min_day, MANIFEST.t_max_day],
+    hiddenCats,
+    umapRange: null,   // [[u0,v0],[u1,v1]] in UMAP-space, or null
+  };
+  window._state = state;
+
+  function passes(p) {
+    if (state.hiddenCats.has(p.bucket)) return false;
+    if (p.day < state.tRange[0] || p.day > state.tRange[1]) return false;
+    if (state.umapRange) {
+      const [[u0,v0],[u1,v1]] = state.umapRange;
+      if (p.d.ux < u0 || p.d.ux > u1 || p.d.uy < v0 || p.d.uy > v1) return false;
+    }
+    return true;
+  }
+  function applyFilter() {
+    globe.setVisibility(passes);
+    if (window.TileView && window.TileView.isOpen()) window.TileView.setVisible(passes);
+    if (drawUmap._repaint) drawUmap._repaint();
+  }
+  window._applyFilter = applyFilter;
+  window._passes = passes;
+  window._points = pts;
+
+  // Timeline histogram
+  drawHistogram();
+  // Hover tooltip + click inspector
+  setupHover();
+  setupClick();
+  // Play button
+  setupPlay();
+  // Fly button
+  // Fly button — animate on the globe to the pilot region, then cross-fade
+  // into a live satellite-tile map where the user can zoom to pixel scale.
+  document.getElementById('fly-btn').addEventListener('click', async () => {
+    globe.setAutoRotate(false);
+    await globe.flyTo(114.05, 4.05, 1.12, 2200);
+    openTileView();
+  });
+  document.getElementById('back-to-globe').addEventListener('click', () => {
+    closeTileView();
+  });
+  // Drawer
+  setupDrawer();
+  // Tweaks
+  setupTweaks();
+  // Zoom indicator
+  setupZoomIndicator();
+  // Range label
+  updateRangeLabel();
+}
+
+function recencySize(d) {
+  const t = (d.d - 0) / 3320;
+  return 0.55 + t * 1.6; // 0.55 → 2.15
+}
+function uniformSize() { return 1.1; }
+
+/* ═════════════ Histogram + brush ═════════════ */
+function drawHistogram() {
+  const svg = d3.select('#hist-svg');
+  function draw() {
+    const bb = svg.node().getBoundingClientRect();
+    const W = bb.width || 800, H = bb.height || 86;
+    svg.attr('viewBox', `0 0 ${W} ${H}`); svg.selectAll('*').remove();
+
+    const m = {l: 8, r: 8, t: 8, b: 22};
+    const x = d3.scaleLinear().range([m.l, W-m.r])
+      .domain([MANIFEST.t_min_day, MANIFEST.t_max_day]);
+
+    const binCount = Math.max(80, Math.min(180, Math.floor((W - m.l - m.r) / 5)));
+    const bins = d3.bin().domain(x.domain()).thresholds(binCount).value(d => d.d)(DATA);
+    const keys = ['deforestation','oilpalm','regrowth'];
+    const binData = bins.map(b => {
+      const o = {x0:b.x0, x1:b.x1, xm:(b.x0+b.x1)/2};
+      keys.forEach(k => o[k] = 0);
+      for (const d of b) o[bucketOf(d)]++;
+      o.total = keys.reduce((s,k)=>s+o[k],0);
+      return o;
+    });
+    const yMax = d3.max(binData, b => b.total) || 1;
+    const y = d3.scaleLinear().domain([0, yMax]).range([H-m.b, m.t]);
+
+    // Defs: a soft gradient per category
+    const defs = svg.append('defs');
+    keys.forEach(k => {
+      const grd = defs.append('linearGradient')
+        .attr('id', `grd-${k}`).attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
+      grd.append('stop').attr('offset','0%').attr('stop-color', BUCKET_COLOR[k]).attr('stop-opacity',0.85);
+      grd.append('stop').attr('offset','100%').attr('stop-color', BUCKET_COLOR[k]).attr('stop-opacity',0.05);
+    });
+
+    // Year tick lines
+    const t0ref = new Date(MANIFEST.t0_day);
+    const years = [];
+    for (let yy = 2016; yy <= 2025; yy++) {
+      const dt = new Date(Date.UTC(yy, 0, 1));
+      const day = Math.round((dt - t0ref) / 86400000);
+      if (day >= MANIFEST.t_min_day && day <= MANIFEST.t_max_day) years.push({ yy, day });
+    }
+    svg.append('g').selectAll('line').data(years).enter().append('line')
+      .attr('class','hist-tick-line')
+      .attr('x1', d => x(d.day)).attr('x2', d => x(d.day))
+      .attr('y1', m.t).attr('y2', H - m.b);
+
+    // Stacked smooth areas (bottom → top: deforestation, oilpalm, regrowth)
+    const stack = d3.stack().keys(keys)(binData);
+    const area = d3.area()
+      .x(d => x(d.data.xm))
+      .y0(d => y(d[0]))
+      .y1(d => y(d[1]))
+      .curve(d3.curveMonotoneX);
+    const gArea = svg.append('g').attr('class','hist-area');
+    stack.forEach(s => {
+      gArea.append('path').attr('d', area(s))
+        .attr('fill', `url(#grd-${s.key})`);
+      // Thin line on top of each band for definition
+      const topLine = d3.line()
+        .x(d => x(d.data.xm))
+        .y(d => y(d[1]))
+        .curve(d3.curveMonotoneX);
+      gArea.append('path').attr('d', topLine(s))
+        .attr('fill','none').attr('stroke', BUCKET_COLOR[s.key])
+        .attr('stroke-width', 1).attr('opacity', 0.9);
+    });
+
+    // Baseline
+    svg.append('line').attr('class','hist-baseline')
+      .attr('x1', m.l).attr('x2', W-m.r).attr('y1', H-m.b).attr('y2', H-m.b);
+
+    // Year labels under baseline
+    svg.append('g').selectAll('text').data(years).enter().append('text')
+      .attr('class', d => 'hist-year-tick' + (d.yy % 2 === 0 ? ' hist-year-major' : ''))
+      .attr('x', d => x(d.day) + 4).attr('y', H - m.b + 14)
+      .text(d => `’${String(d.yy).slice(-2)}`);
+
+    // Brush
+    // Brush. RAF-throttle — the handler fires per-mousemove and the filter
+    // pass is the most expensive thing per frame, so coalesce multiple
+    // mouse events into a single frame's worth of work.
+    let brushRaf = null, pendingRange = null;
+    function flushBrush() {
+      brushRaf = null;
+      if (!pendingRange) return;
+      window._state.tRange = pendingRange;
+      window._applyFilter();
+      updateRangeLabel();
+      drawOverlay();
+      pendingRange = null;
+    }
+    const brush = d3.brushX().extent([[m.l, m.t-2], [W-m.r, H-m.b]])
+      .on('brush end', ev => {
+        if (!ev.sourceEvent) return;
+        if (!ev.selection) {
+          pendingRange = [MANIFEST.t_min_day, MANIFEST.t_max_day];
+        } else {
+          pendingRange = ev.selection.map(x.invert);
+        }
+        if (!brushRaf) brushRaf = requestAnimationFrame(flushBrush);
+      });
+    const brushG = svg.append('g').attr('class','brush').call(brush);
+    const overlayG = svg.append('g').attr('class','hist-overlay').attr('pointer-events','none');
+
+    function drawOverlay() {
+      overlayG.selectAll('*').remove();
+      const [t0, t1] = window._state.tRange;
+      const x0 = x(t0), x1 = x(t1);
+      const yT = m.t - 2, yB = H - m.b;
+      const yMid = (yT + yB) / 2;
+      // Dim everything outside the range
+      if (x0 > m.l) overlayG.append('rect').attr('class','hist-dim')
+        .attr('x', m.l).attr('y', yT).attr('width', x0 - m.l).attr('height', yB - yT);
+      if (x1 < W - m.r) overlayG.append('rect').attr('class','hist-dim')
+        .attr('x', x1).attr('y', yT).attr('width', (W - m.r) - x1).attr('height', yB - yT);
+      // Chunky white vertical bar + circular grip on each edge, mirroring
+      // the before/after slider so the interaction reads the same.
+      [x0, x1].forEach(xx => {
+        overlayG.append('line').attr('class','hist-edge')
+          .attr('x1', xx).attr('x2', xx).attr('y1', yT).attr('y2', yB);
+        overlayG.append('circle').attr('class','hist-edge-grip')
+          .attr('cx', xx).attr('cy', yMid).attr('r', 13);
+        overlayG.append('text').attr('class','hist-edge-grip-glyph')
+          .attr('x', xx).attr('y', yMid).text('‹ ›');
+      });
+    }
+
+    if (window._state && window._state.tRange) {
+      brushG.call(brush.move, window._state.tRange.map(x));
+    }
+    drawOverlay();
+
+    // Expose a cheap "just move the brush" updater so the play-animation
+    // and external scrubbers don't have to rebuild the entire histogram.
+    window._moveBrush = (tRange) => {
+      brushG.call(brush.move, tRange.map(x));
+      drawOverlay();
+    };
+  }
+  draw();
+  window.addEventListener('resize', draw);
+}
+
+function updateRangeLabel() {
+  const [t0, t1] = window._state.tRange;
+  const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(t0));
+  const d1 = new Date(MANIFEST.t0_day); d1.setDate(d1.getDate() + Math.round(t1));
+  const f = d3.timeFormat('%b %Y');
+  document.getElementById('range-label').textContent = `${f(d0)} → ${f(d1)}`;
+}
+
+/* ═════════════ Hover tooltip ═════════════ */
+function labelFor(b) {
+  return b === 'deforestation' ? 'Deforestation' : b === 'oilpalm' ? 'Oil-palm conversion' : 'Reforestation';
+}
+function setupHover() {
+  const tt = document.getElementById('tooltip');
+  const mount = document.getElementById('globe-mount');
+  let raf = null;
+  mount.addEventListener('mousemove', e => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      const p = globe.pickPoint(e.clientX, e.clientY, 14);
+      mount.style.cursor = p ? 'pointer' : 'grab';
+      if (!p) { tt.style.visibility = 'hidden'; return; }
+      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
+      tt.innerHTML = `
+        <div class="t-head">${labelFor(p.bucket)}</div>
+        <div class="t-meta">${d3.timeFormat('%Y · %b %d')(d0)}</div>
+        <div class="t-meta">${p.lat.toFixed(4)}°N &nbsp; ${p.lon.toFixed(4)}°E</div>
+        <div class="t-meta" style="opacity:.7;margin-top:4px">click to pin</div>
+      `;
+      tt.style.left = (e.clientX + 14) + 'px';
+      tt.style.top  = (e.clientY + 14) + 'px';
+      tt.style.visibility = 'visible';
+    });
+  });
+  mount.addEventListener('mouseleave', () => { tt.style.visibility = 'hidden'; mount.style.cursor = 'grab'; });
+}
+
+function setupClick() {
+  const ins = document.getElementById('inspector');
+  const mount = document.getElementById('globe-mount');
+  // Distinguish click from drag
+  let down = null;
+  mount.addEventListener('pointerdown', e => { down = {x:e.clientX, y:e.clientY, t:performance.now()}; });
+  mount.addEventListener('pointerup', e => {
+    if (!down) return;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    const dt = performance.now() - down.t;
+    down = null;
+    if (Math.hypot(dx,dy) > 5 || dt > 400) return; // it was a drag
+    const p = globe.pickPoint(e.clientX, e.clientY, 14);
+    if (!p) { ins.style.visibility = 'hidden'; return; }
+    const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
+    document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>${labelFor(p.bucket)}`;
+    document.getElementById('ins-when').textContent = d3.timeFormat('%Y %b %d')(d0);
+    document.getElementById('ins-where').textContent = `${p.lat.toFixed(4)}°N ${p.lon.toFixed(4)}°E`;
+    document.getElementById('ins-ndvi').textContent = p.d.n.toFixed(3);
+    ins.style.left = Math.min(window.innerWidth - 310, e.clientX + 16) + 'px';
+    ins.style.top  = Math.min(window.innerHeight - 200, e.clientY + 16) + 'px';
+    ins.style.visibility = 'visible';
+  });
+  document.getElementById('ins-close').addEventListener('click', () => ins.style.visibility = 'hidden');
+}
+
+/* ═════════════ Play ═════════════ */
+let playing = false;
+function setupPlay() {
+  const btn = document.getElementById('play-btn');
+  btn.addEventListener('click', () => {
+    if (playing) { playing = false; btn.classList.remove('playing'); btn.querySelector('.lbl').textContent = 'Play timeline'; return; }
+    playing = true; btn.classList.add('playing'); btn.querySelector('.lbl').textContent = 'Pause';
+    const tMin = MANIFEST.t_min_day, tMax = MANIFEST.t_max_day;
+    const dur = 18000, start = performance.now();
+    function step(now) {
+      if (!playing) return;
+      const k = (now - start) / dur;
+      if (k >= 1) {
+        playing = false; btn.classList.remove('playing'); btn.querySelector('.lbl').textContent = 'Play timeline';
+        window._state.tRange = [tMin, tMax];
+        window._applyFilter();
+        if (window._moveBrush) window._moveBrush(window._state.tRange);
+        updateRangeLabel();
+        return;
+      }
+      window._state.tRange = [tMin, tMin + (tMax-tMin)*k];
+      window._applyFilter();
+      if (window._moveBrush) window._moveBrush(window._state.tRange);
+      updateRangeLabel();
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+/* ═════════════ Drawer (UMAP + before/after) ═════════════ */
+function setupDrawer() {
+  // No-op — the former drawer is now embedded in the tile view and is
+  // initialized on openTileView(). Kept as a stub so existing call-sites
+  // don't error.
+}
+
+function drawUmap() {
+  const svg = d3.select('#umap-svg');
+  const canvas = document.getElementById('umap-canvas');
+  const bb = svg.node().getBoundingClientRect();
+  const W = bb.width || 500, H = bb.height || 340;
+  svg.attr('viewBox', `0 0 ${W} ${H}`); svg.selectAll('*').remove();
+  const dpr = devicePixelRatio || 1;
+  canvas.width = W*dpr; canvas.height = H*dpr;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+
+  const m = {l:42,r:14,t:12,b:32};
+  const x = d3.scaleLinear().range([m.l, W-m.r])
+    .domain(d3.extent(DATA, d=>d.ux)).nice();
+  const y = d3.scaleLinear().range([H-m.b, m.t])
+    .domain(d3.extent(DATA, d=>d.uy)).nice();
+  svg.append('g').attr('class','axis axis-dark')
+    .attr('transform',`translate(0,${H-m.b})`).call(d3.axisBottom(x).ticks(6));
+  svg.append('g').attr('class','axis axis-dark')
+    .attr('transform',`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5));
+
+  // ── Points: dim any that the current umapRange brush excludes.
+  const ur = window._state && window._state.umapRange;
+  ctx.globalAlpha = 0.72;
+  for (const d of DATA) {
+    const b = bucketOf(d);
+    if (window._state.hiddenCats.has(b)) continue;
+    if (d.d < window._state.tRange[0] || d.d > window._state.tRange[1]) continue;
+    const inside = !ur || (d.ux >= ur[0][0] && d.ux <= ur[1][0] && d.uy >= ur[0][1] && d.uy <= ur[1][1]);
+    ctx.globalAlpha = inside ? 0.78 : 0.10;
+    ctx.fillStyle = BUCKET_COLOR[b];
+    ctx.beginPath();
+    ctx.arc(x(d.ux), y(d.uy), 1.2, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // ── Brush to lasso a region of UMAP-space.
+  const clearLink = document.getElementById('umap-clear');
+  const brush = d3.brush()
+    .extent([[m.l, m.t], [W - m.r, H - m.b]])
+    .on('brush end', (ev) => {
+      const s = ev.selection;
+      if (!s) {
+        window._state.umapRange = null;
+        if (clearLink) clearLink.classList.add('inactive');
+      } else {
+        window._state.umapRange = [
+          [x.invert(s[0][0]), y.invert(s[1][1])],
+          [x.invert(s[1][0]), y.invert(s[0][1])],
+        ];
+        if (clearLink) clearLink.classList.remove('inactive');
+      }
+      window._applyFilter();
+      // Re-tint the UMAP dots to reflect the new selection.
+      drawUmap._repaint();
+    });
+  const brushG = svg.append('g').attr('class','brush').call(brush);
+  // Restore existing brush selection on redraw (e.g. after window resize).
+  if (ur) {
+    const px = [
+      [x(ur[0][0]), y(ur[1][1])],
+      [x(ur[1][0]), y(ur[0][1])],
+    ];
+    brushG.call(brush.move, px);
+  }
+
+  // Repaint-only helper (used by brush handler without rebuilding axes/brush).
+  drawUmap._repaint = () => {
+    const ur = window._state && window._state.umapRange;
+    ctx.clearRect(0,0,W,H);
+    for (const d of DATA) {
+      const b = bucketOf(d);
+      if (window._state.hiddenCats.has(b)) continue;
+      if (d.d < window._state.tRange[0] || d.d > window._state.tRange[1]) continue;
+      const inside = !ur || (d.ux >= ur[0][0] && d.ux <= ur[1][0] && d.uy >= ur[0][1] && d.uy <= ur[1][1]);
+      ctx.globalAlpha = inside ? 0.78 : 0.10;
+      ctx.fillStyle = BUCKET_COLOR[b];
+      ctx.beginPath();
+      ctx.arc(x(d.ux), y(d.uy), 1.2, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  };
+
+  if (clearLink && !clearLink._wired) {
+    clearLink._wired = true;
+    clearLink.addEventListener('click', () => {
+      brushG.call(brush.move, null);
+    });
+  }
+}
+
+function setupBeforeAfter() {
+  const wrap = document.getElementById('ba-wrap');
+  if (!wrap) return;
+  const handle = wrap.querySelector('.ba-handle');
+  const after = wrap.querySelector('.ba-after');
+  let x = 0.5;
+  function set(xp) {
+    x = Math.max(0, Math.min(1, xp));
+    // Overlay covers the LEFT ("before") half — dimmed so it reads as baseline.
+    // Dots still render only on the RIGHT ("after") half via window.__baSplitX.
+    if (after) after.style.clipPath = `polygon(0 0, ${x*100}% 0, ${x*100}% 100%, 0 100%)`;
+    if (handle) handle.style.left = (x*100) + '%';
+    window.__baSplitX = x;
+    if (window.TileView && window.TileView.isOpen()) window.TileView.refresh();
+  }
+  set(0.5);
+  let drag = false;
+  function ev(e) {
+    const r = wrap.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    set(cx / r.width);
+  }
+  if (handle) handle.addEventListener('pointerdown', e => { drag = true; e.preventDefault(); });
+  window.addEventListener('pointermove', e => { if (drag) ev(e); });
+  window.addEventListener('pointerup', () => drag = false);
+}
+
+/* ═════════════ Tweaks ═════════════ */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "showOverlays": true,
+  "autoRotate": true,
+  "dotSizing": "uniform"
+}/*EDITMODE-END*/;
+
+function setupTweaks() {
+  const ov = document.getElementById('tw-overlays');
+  const ar = document.getElementById('tw-autorot');
+  const ds = document.getElementById('tw-dotsize');
+  ov.addEventListener('change', () => {
+    // overlay = pilot box on globe
+    // easiest: just re-apply box; hiding requires slight refactor
+  });
+  ar.addEventListener('change', () => globe.setAutoRotate(ar.checked));
+  ds.addEventListener('change', () => {
+    // Rebuild point sizes
+    const pts = DATA.map(d => ({
+      lon:d.x, lat:d.y, day:d.d, bucket: bucketOf(d),
+      color: BUCKET_COLOR[bucketOf(d)],
+      size: ds.value === 'uniform' ? 1.1 : recencySize(d),
+      d,
+    }));
+    globe.setPoints(pts);
+    window._applyFilter();
+  });
+
+  // Apply defaults
+  ov.checked = TWEAK_DEFAULTS.showOverlays;
+  ar.checked = TWEAK_DEFAULTS.autoRotate;
+  ds.value = TWEAK_DEFAULTS.dotSizing;
+  globe.setAutoRotate(ar.checked);
+
+  window.addEventListener('message', e => {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === '__activate_edit_mode') document.getElementById('tweaks').classList.add('visible');
+    else if (e.data.type === '__deactivate_edit_mode') document.getElementById('tweaks').classList.remove('visible');
+  });
+  [ov, ar, ds].forEach(el => el.addEventListener('change', () => {
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: {
+      showOverlays: ov.checked, autoRotate: ar.checked, dotSizing: ds.value,
+    }}, '*');
+  }));
+  window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+}
+
+/* ═════════════ Tile view open/close ═════════════ */
+function openTileView() {
+  const tt = document.getElementById('tooltip');
+  window.TileView.open({
+    center: [114.05, 4.05],
+    zoom: 13.2,
+    points: window._points,
+    visible: window._passes,
+    onHover: (p, e) => {
+      if (!p) { tt.style.visibility = 'hidden'; return; }
+      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
+      tt.innerHTML = `
+        <div class="t-head">${labelFor(p.bucket)}</div>
+        <div class="t-meta">${d3.timeFormat('%Y · %b %d')(d0)}</div>
+        <div class="t-meta">${p.lat.toFixed(4)}°N &nbsp; ${p.lon.toFixed(4)}°E</div>
+      `;
+      tt.style.left = (e.clientX + 14) + 'px';
+      tt.style.top  = (e.clientY + 14) + 'px';
+      tt.style.visibility = 'visible';
+    },
+    onClick: (p, e) => {
+      const ins = document.getElementById('inspector');
+      if (!p) { ins.style.visibility = 'hidden'; return; }
+      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
+      document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>${labelFor(p.bucket)}`;
+      document.getElementById('ins-when').textContent = d3.timeFormat('%Y %b %d')(d0);
+      document.getElementById('ins-where').textContent = `${p.lat.toFixed(4)}°N ${p.lon.toFixed(4)}°E`;
+      document.getElementById('ins-ndvi').textContent = p.d.n.toFixed(3);
+      const cx = e ? e.clientX : window.innerWidth/2;
+      const cy = e ? e.clientY : window.innerHeight/2;
+      ins.style.left = Math.min(window.innerWidth - 310, cx + 16) + 'px';
+      ins.style.top  = Math.min(window.innerHeight - 200, cy + 16) + 'px';
+      ins.style.visibility = 'visible';
+      window.TileView.setHighlight(p);
+    },
+  });
+  document.body.classList.add('in-tile-view');
+  // Lazy-build the analysis panels the first time the tile view opens.
+  if (!openTileView._built) {
+    openTileView._built = true;
+    // Give layout a tick to settle so canvases measure correctly.
+    setTimeout(() => { try { drawUmap(); setupBeforeAfter(); } catch(e) { console.warn(e); } }, 120);
+  }
+}
+function closeTileView() {
+  window.TileView.close();
+  document.body.classList.remove('in-tile-view');
+  document.getElementById('tooltip').style.visibility = 'hidden';
+}
+
+/* ═════════════ Zoom indicator ═════════════ */
+function setupZoomIndicator() {
+  const fill = document.getElementById('zoom-fill');
+  const lbl = document.getElementById('zoom-label');
+  setInterval(() => {
+    const d = globe.getDist();
+    // d range 1.12 (close) → 5.5 (far)
+    const t = 1 - (d - 1.12) / (5.5 - 1.12);
+    fill.style.width = Math.max(3, t * 100) + '%';
+    if (d < 1.18) lbl.textContent = 'pixel-level';
+    else if (d < 1.4) lbl.textContent = 'pilot tile';
+    else if (d < 1.9) lbl.textContent = 'Baram interior';
+    else if (d < 2.8) lbl.textContent = 'Sarawak';
+    else if (d < 3.6) lbl.textContent = 'Borneo';
+    else lbl.textContent = 'space';
+  }, 200);
+}
+</script>
+</body>
+</html>
