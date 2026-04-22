@@ -92,14 +92,26 @@
   // points and the tab freezes.
   const LOD_ZOOM_SWITCH = 13;
   const BIN_MAX_CACHE   = 48;                   // LRU budget (~48 × ~1 MB)
-  const BIN_BASE        = 'data/tiles/2of3/';
+  // Split the serving paths: GitHub Pages returns the raw LFS pointer
+  // text for .bin files (Pages doesn't resolve LFS), so the live site
+  // fetches binaries from media.githubusercontent.com/media/... which
+  // DOES resolve LFS and ships CORS. manifest.json stays on Pages — it's
+  // not LFS-tracked, and media URLs return 404 for non-LFS files.
+  const MEDIA_BASE = 'https://media.githubusercontent.com/media/tingyuansen/borneo-deforestation/main/data/tiles/2of3/';
+  const LOCAL_BASE = 'data/tiles/2of3/';
+  const IS_PAGES_HOST = (() => {
+    const h = (typeof location !== 'undefined' && location.hostname) || '';
+    return h === 'tingyuansen.github.io' || /\.github\.io$/.test(h);
+  })();
+  const MANIFEST_URL = LOCAL_BASE + 'manifest.json';          // always Pages / local
+  const BIN_BASE     = IS_PAGES_HOST ? MEDIA_BASE : LOCAL_BASE;
   let   binManifest     = null;                 // { tiles: { iy_ix: {...} } }
   const binCache        = new Map();            // key → { dx, dy, yr, n, lonMin, latMin }
   const binFetching     = new Set();
 
   function loadBinManifest() {
     if (binManifest || loadBinManifest._pending) return loadBinManifest._pending;
-    loadBinManifest._pending = fetch(BIN_BASE + 'manifest.json')
+    loadBinManifest._pending = fetch(MANIFEST_URL)
       .then(r => r.ok ? r.json() : null)
       .then(m => { binManifest = m; draw(); return m; })
       .catch(e => { console.warn('[tile-bin] manifest failed', e); return null; });
