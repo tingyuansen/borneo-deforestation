@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Borneo, in pixels · Sarawak deforestation on the globe</title>
+<title>Borneo, in pixels · deforestation on the globe</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/h3-js@4.1.0"></script>
 <style>
   :root {
     --ink:      #1b1712;
@@ -132,9 +133,37 @@
   .cat-chip .lbl { flex: 1; }
   .cat-chip .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98; }
   .cat-chip.off { opacity: 0.35; }
-  .cat-chip.deforestation .sw { background: #e0553a; color: #e0553a; }
-  .cat-chip.oilpalm       .sw { background: #e09550; color: #e09550; }
-  .cat-chip.regrowth      .sw { background: #6fbf5c; color: #6fbf5c; }
+  /* Coolwarm cluster-tag palette — matches 07_labeled_webviz.py output. */
+  .cat-chip.deforest .sw { background: #b73a3a; color: #b73a3a; }
+  .cat-chip.regrowth .sw { background: #2e7a3a; color: #2e7a3a; }
+  .cat-chip.mixed    .sw { background: #8a7a60; color: #8a7a60; }
+  /* Gradient swatch replaces the flat-colour dot on the deforest chip —
+     reads left-to-right as "strongest cluster → weakest" so the user
+     can map the shade variation they see in the viz back to the chip. */
+  .cat-chip.deforest .sw.sw-gradient {
+    width: 22px; height: 10px; border-radius: 2px;
+    background: linear-gradient(90deg, #b73a3a, #c65438, #d46d45, #dc8551, #e29e66, #e7b27e);
+  }
+  /* "In view" panel — live-updated hectares of visible deforestation
+     whenever the user pans/zooms the tile map. Sits under the chips so
+     the user can eyeball "I'm looking at N hectares of clearing". */
+  .viewport-panel {
+    margin-top: 10px; padding: 8px 12px; border-radius: 8px;
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(6px);
+    border: 1px solid var(--rule-2);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .viewport-panel .vp-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .viewport-panel .vp-value {
+    font-size: 20px; font-weight: 600; color: #e7c798;
+  }
+  .viewport-panel .vp-sub {
+    font-size: 9px; color: var(--muted); margin-top: 4px; opacity: 0.7;
+  }
+  body:not(.in-tile-view) .viewport-panel { display: none; }
 
   .how {
     font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
@@ -168,8 +197,24 @@
   .btn.primary {
     background: var(--ochre); color: #1b1712; border-color: var(--ochre);
     box-shadow: 0 8px 24px rgba(198,123,47,0.25);
+    font-weight: 600; padding: 12px 18px; font-size: 14px;
+    justify-content: center;
   }
-  .btn.primary:hover { background: var(--amber); border-color: var(--amber); color: #1b1712; }
+  .btn.primary:hover { background: var(--amber); border-color: var(--amber);
+                       color: #1b1712; }
+  /* Lightweight replacement for the old primary "Fly in" button — the
+     whole globe is now the click target, so the rail just needs to tell
+     the user that. Styled quiet so it doesn't pull focus from the globe. */
+  .fly-hint {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: rgba(244,237,225,0.7); font-family: 'Inter', sans-serif;
+    font-size: 12px; letter-spacing: 0.02em;
+    padding: 8px 12px; border-radius: 999px;
+    background: rgba(12,9,6,0.4); backdrop-filter: blur(6px);
+    border: 1px solid rgba(200,200,200,0.08);
+    pointer-events: none;
+  }
+  .fly-hint .ic { width: 14px; height: 14px; opacity: 0.7; }
   .btn .ic { width: 16px; height: 16px; flex-shrink: 0; }
   .btn .tri {
     width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent;
@@ -523,6 +568,54 @@
   body.in-tile-view .hud-right { bottom: 170px; transition: bottom 0.35s ease; }
   #tile-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
   #tile-canvas:active { cursor: grabbing; }
+  /* On-screen pan/zoom console — only visible after the user flies in to
+     the tile view. The globe has its own drag/wheel gestures and doesn't
+     need buttons. */
+  #tile-console {
+    position: fixed; right: 24px; bottom: 120px; z-index: 40;
+    display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
+  }
+  body:not(.in-tile-view) #tile-console { display: none; }
+  #tile-console .pad, #tile-console .zoom {
+    display: grid; gap: 4px; pointer-events: auto;
+    /* No container chrome — each .pc-btn carries its own pill background. */
+    padding: 0;
+  }
+  #tile-console .pad {
+    grid-template-columns: repeat(3, 48px);
+    grid-template-rows: repeat(3, 44px);
+    grid-template-areas: ".    up    ." "left .    right" ".    down  .";
+  }
+  #tile-console .pad [data-dir=up]    { grid-area: up; }
+  #tile-console .pad [data-dir=down]  { grid-area: down; }
+  #tile-console .pad [data-dir=left]  { grid-area: left; }
+  #tile-console .pad [data-dir=right] { grid-area: right; }
+  #tile-console .zoom { grid-template-rows: repeat(2, 44px); grid-template-columns: 48px; }
+  .pc-btn {
+    /* Each button is its own tinted-pill — no shared container chrome. */
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(6px);
+    color: #f4ede1;
+    border: 1px solid rgba(244,237,225,0.22); border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 18px;
+    cursor: pointer; line-height: 1; padding: 0;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .pc-btn:hover  { background: rgba(12,9,6,0.78); color: #e7c798;
+                   border-color: rgba(231,199,152,0.5); }
+  .pc-btn:active { background: rgba(231,199,152,0.35); color: #1b1712; }
+  /* Year-colour legend — one colour swatch per year, so users can read a hex
+     colour back to its median change year at a glance. */
+  .year-legend {
+    display: flex; gap: 4px; font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; color: var(--muted); margin-top: 8px; flex-wrap: wrap;
+  }
+  .year-legend .y {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .year-legend .sw {
+    width: 14px; height: 10px; border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.2);
+  }
   #tile-hud {
     position: absolute; top: 22px; left: 24px;
     display: flex; gap: 16px; align-items: flex-start; z-index: 2;
@@ -581,15 +674,35 @@
 
 <div id="loader">
   <div class="ring"></div>
-  <div class="msg">Loading 47,126 pixels · Borneo rising</div>
+  <div class="msg">Loading state-wide detections · Borneo rising</div>
 </div>
 
 <div id="globe-mount"></div>
+
+<!-- On-screen pan/zoom console — visible on both globe and tile view so
+     touch-pad users and anyone without pinch/wheel gestures can still
+     navigate. JS routes clicks to whichever view is active. -->
+<div id="tile-console">
+  <div class="pad">
+    <button class="pc-btn" data-dir="up"    aria-label="pan up">▲</button>
+    <button class="pc-btn" data-dir="left"  aria-label="pan left">◀</button>
+    <button class="pc-btn" data-dir="right" aria-label="pan right">▶</button>
+    <button class="pc-btn" data-dir="down"  aria-label="pan down">▼</button>
+  </div>
+  <div class="zoom">
+    <button class="pc-btn" data-zoom="+1" aria-label="zoom in">＋</button>
+    <button class="pc-btn" data-zoom="-1" aria-label="zoom out">－</button>
+  </div>
+</div>
 <div id="tile-view" class="hidden">
   <div id="tile-map-pane">
     <canvas id="tile-canvas"></canvas>
-    <!-- Baked-in before/after slider — sits above the tile canvas, inside
-         the tile pane so z-indexing works and pointer events reach it. -->
+    <!-- Before/after split. No second imagery layer yet (state-wide
+         pre/post composites TBD), so both halves show the same Esri
+         basemap; the split just clips the detection-dot layer so the
+         user can compare raw satellite (left, "before") against the
+         same imagery with our dots overlaid (right, "after"). Drives
+         window.__baSplitX — tile-view.js reads it. -->
     <div id="ba-inset">
       <div class="ba-wrap" id="ba-wrap">
         <div class="ba-after"></div>
@@ -605,7 +718,8 @@
   </div>
 </div>
 
-<!-- UMAP inset (top-right, translucent) — only visible in tile view -->
+<!-- UMAP inset (pilot / Baram pixel-similarity view) — commented out until
+     Method-A cluster labels are assigned to all 858M state-wide pixels.
 <div id="umap-inset" class="inset-card">
   <div class="eyebrow">Pixel similarity · UMAP</div>
   <h3>How similar are the <em>changes?</em></h3>
@@ -619,17 +733,19 @@
     <a id="umap-clear" class="inactive">clear</a>
   </div>
 </div>
+-->
 <!-- HUD: title -->
 <div class="hud hud-title">
   <span class="kicker"><span class="dot"></span>A decade of forest change · on the globe</span>
   <h1>Borneo, <em>in pixels.</em></h1>
-  <p>Every dot is one Sentinel-2 satellite pixel where the rainforest canopy of northern Sarawak suddenly changed between 2015 and 2024. Drag, zoom, scrub.</p>
+  <p>Every dot is one Sentinel-2 pixel where the rainforest canopy of northern Borneo went through a step-change between 2015 and 2024 — mostly canopy loss, some regrowth. Drag, zoom, scrub.</p>
   <div class="provenance">
     <b>Public data only.</b> No sensitive or proprietary information. Imagery derived from ESA/Copernicus Sentinel-2 (open licence); basemap tiles from Esri World Imagery.
   </div>
 </div>
 
-<!-- HUD: stats -->
+<!-- HUD: stats — hectares / canopy-lost numbers are pilot-specific and will
+     be reinstated once Method-A cluster labels are applied state-wide.
 <div class="hud hud-stats">
   <div class="stat-card">
     <div class="num" id="stat-ha">—</div>
@@ -642,35 +758,61 @@
     <div class="sub">2015-11-26 → 2024-12-28</div>
   </div>
 </div>
+-->
 
 <!-- HUD: left rail (filters + how-to) -->
 <div class="hud hud-left">
-  <div class="cat-chip deforestation" data-cat="deforestation"><span class="sw"></span><span class="lbl">Deforestation</span><span class="count" id="ct-deforestation"></span></div>
-  <div class="cat-chip oilpalm" data-cat="oilpalm"><span class="sw"></span><span class="lbl">Oil-palm conversion</span><span class="count" id="ct-oilpalm"></span></div>
-  <div class="cat-chip regrowth" data-cat="regrowth"><span class="sw"></span><span class="lbl">Reforestation</span><span class="count" id="ct-regrowth"></span></div>
-  <div class="how">
-    <div><span class="k">drag</span>rotate</div>
-    <div><span class="k">wheel</span>zoom</div>
-    <div><span class="k">hover</span>inspect pixel</div>
+  <!-- Detection-rule toggle removed: focusing on 2-of-3 primary only for
+       Phase 1. Re-enable after K=15 hex layer is polished. -->
+  <!-- Two confident HDBSCAN classes. Water-ward + mixed clusters are
+       excluded up-stream so they can't distract from the real signal. -->
+  <!-- Deforestation by severity group. Each chip toggles one cohort of
+       HDBSCAN clusters. Severity = rank within the deforest-tagged
+       clusters by pixel count (bigger cluster = more common spectral
+       regime = "the typical clearing signature"). -->
+  <div class="cat-chip deforest" data-group="severe">
+    <span class="sw" style="background:#c65438;"></span>
+    <span class="lbl">Severe clearing</span>
+    <span class="count" id="ct-severe"></span>
   </div>
+  <div class="cat-chip deforest" data-group="heavy">
+    <span class="sw" style="background:#d46d45;"></span>
+    <span class="lbl">Heavy clearing</span>
+    <span class="count" id="ct-heavy"></span>
+  </div>
+  <div class="cat-chip deforest" data-group="moderate">
+    <span class="sw" style="background:#e7b27e;"></span>
+    <span class="lbl">Moderate / gradual</span>
+    <span class="count" id="ct-moderate"></span>
+  </div>
+  <div class="cat-chip deforest" data-group="suspect">
+    <span class="sw" style="background:#e8d9b8;"></span>
+    <span class="lbl">Suspect (topo / weak)</span>
+    <span class="count" id="ct-suspect"></span>
+  </div>
+  <div class="viewport-panel">
+    <div class="vp-label">In view</div>
+    <div class="vp-value" id="vp-ha">—</div>
+    <div class="vp-sub">updated 300 ms after pan/zoom</div>
+  </div>
+  <!-- Density-ramp legend removed — cluster-tag palette is self-explanatory
+       via the chip colours. -->
   <button class="btn" id="play-btn">
     <span class="tri"></span><span class="lbl">Play timeline</span>
   </button>
 </div>
 
 <!-- Zoom indicator -->
-<div class="zoom-indicator">
-  <span>ZOOM</span>
-  <div class="bar"><div class="fill" id="zoom-fill"></div></div>
-  <span id="zoom-label">space</span>
-</div>
+<!-- Zoom indicator removed — dashboard uses LOD switches internally; the
+     extra text was redundant visual noise. -->
+
 
 <!-- HUD: right rail (actions) -->
 <div class="hud hud-right">
-  <button class="btn primary" id="fly-btn">
+  <div class="fly-hint" id="fly-btn">
     <svg class="ic" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg>
-    Fly in to Baram, Sarawak
-  </button>
+    click anywhere to fly into Baram
+  </div>
 </div>
 
 <!-- Bottom timeline bar -->
@@ -720,153 +862,336 @@
 <script src="tile-view.js"></script>
 <script>
 /* ═════════════ Data constants ═════════════ */
-const BUCKET_COLOR = {
-  deforestation: '#d94f35',  // deep cinnabar — reads over forest green
-  oilpalm:       '#e0a25c',  // warm ochre — distinct from both red & green
-  regrowth:      '#7fbf86',  // sage green — soft, not neon
-};
-function bucketOf(d) {
-  // Fast path: decoder pre-computes this as a single byte. Fallback keeps
-  // the predicate working for any legacy paths that might mutate records.
-  if (d._b !== undefined) return BUCKET_NAMES[d._b];
-  return d.n > 0.05 ? 'regrowth' : d.n < -0.27 ? 'deforestation' : 'oilpalm';
+// Hex fill colour carries change-density — ranked by total detection count
+// per hex. A naive log10 on the raw count collapses almost every hex to
+// the same colour because 80% sit in log10(n) ∈ [3.6, 4.6]; instead we
+// rank and use the *percentile* as the colour input so the full ramp is
+// used regardless of distribution shape. Warm-to-hot (cream → ochre →
+// cinnabar → crimson) reads as a classic heat map.
+const HEX_BASE_COLOR = '#c67b2f';   // fallback (pre-rank assignment)
+function hexDensityColor(t) {       // t ∈ [0,1]
+  const stops = [
+    [0.00, [0xe8, 0xd9, 0xb8]],   // pale amber
+    [0.33, [0xe0, 0xa2, 0x5c]],   // warm ochre
+    [0.66, [0xd9, 0x4f, 0x35]],   // cinnabar
+    [1.00, [0x7a, 0x24, 0x18]],   // deep crimson
+  ];
+  let lo = stops[0], hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i][0] && t <= stops[i+1][0]) { lo = stops[i]; hi = stops[i+1]; break; }
+  }
+  const u = (t - lo[0]) / (hi[0] - lo[0] || 1);
+  const rgb = [0,1,2].map(i => Math.round(lo[1][i] + (hi[1][i] - lo[1][i]) * u));
+  return '#' + rgb.map(x => x.toString(16).padStart(2,'0')).join('');
 }
+window.hexDensityColor = hexDensityColor;
 
 /* ═════════════ Load data ═════════════ */
 const P = name => `data/${name}`;
-let DATA, MANIFEST;
+let MANIFEST;
 let globe;
 
-// Decode base64 → typed array view of the given ctor (Float32Array, Uint8Array...)
-function b64ToTyped(str, Ctor) {
-  const bin = atob(str);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Ctor(bytes.buffer, bytes.byteOffset, bytes.byteLength / Ctor.BYTES_PER_ELEMENT);
-}
+// Detection data is served in three tiers so the client only pays for
+// what the current camera distance actually shows:
+//   SARAWAK_HEXES_COARSE  — H3 res 7 (~28k hexes, always loaded)
+//   SARAWAK_HEXES_FINE    — H3 res 8 (~188k hexes, lazy at close zoom)
+//   .bin tiles (tile-view) — 643M per-pixel labels, 0.1°×0.1° streaming
+// Both hex files arrive pre-classified by 11_rebuild_labeled_hexes.py
+// (each hex carries cluster_id, tag, deforest_n already computed from
+// the full 643M map). CLUSTER_META turns cluster id → paint colour.
+let SARAWAK_HEXES_COARSE = null;
+let SARAWAK_HEXES_FINE   = null;
+let CLUSTER_META         = null;
 
-// Reconstitute the packed detections file into the same array-of-objects
-// shape the rest of the app expects. ~14× smaller over the wire, and
-// avoids JSON-parsing 47k individual objects.
-function decodeDetections(packed) {
-  const xyd = b64ToTyped(packed.xyd, Float32Array);
-  const uu  = b64ToTyped(packed.uu,  Float32Array);
-  const nn  = b64ToTyped(packed.nn,  Float32Array);
-  const bb  = b64ToTyped(packed.bb,  Uint8Array);
-  const N = packed.count;
-  const out = new Array(N);
-  for (let i = 0; i < N; i++) {
-    out[i] = {
-      x: xyd[i*3], y: xyd[i*3+1], d: xyd[i*3+2],
-      ux: uu[i*2], uy: uu[i*2+1],
-      n: nn[i],
-      // bucket/color cached here so bucketOf() is O(1) and we stop allocating
-      // colors and running the predicate hundreds of thousands of times.
-      _b: bb[i],
-    };
-  }
-  return out;
-}
-
-// Fast bucket from the cached byte (0=deforest, 1=oilpalm, 2=regrowth).
-const BUCKET_NAMES = ['deforestation','oilpalm','regrowth'];
+console.log('[boot] starting fetches');
 
 Promise.all([
   fetch(P('manifest.json')).then(r=>r.json()),
-  fetch(P('detections.packed.json')).then(r=>r.json()),
-]).then(([manifest, packed]) => {
+  fetch(P('sarawak_hexes_2of3_res7.json')).then(r=>r.json())
+    .catch(e => { console.warn('[boot] hex res7 fetch failed', e); return null; }),
+  fetch(P('sarawak_cluster_meta.json')).then(r=>r.json())
+    .catch(e => { console.warn('[boot] cluster meta fetch failed', e); return null; }),
+]).then(([manifest, hexCoarse, clusterMeta]) => {
   MANIFEST = manifest;
-  DATA = decodeDetections(packed);
-  boot();
+  SARAWAK_HEXES_COARSE = hexCoarse;
+  CLUSTER_META         = clusterMeta;
+  window.SARAWAK_HEXES_COARSE = SARAWAK_HEXES_COARSE;
+  window.SARAWAK_HEXES_FINE   = null;
+  window.CLUSTER_META         = CLUSTER_META;
+  console.log(`[boot] hexes=${hexCoarse?.length}  clusters=${clusterMeta?.n_clusters}`);
+  try { boot(); console.log('[boot] boot() done'); }
+  catch(e) { console.error('[boot] boot() failed:', e, e.stack); }
+}).catch(e => {
+  console.error('[boot] Promise.all FAILED:', e, e.stack);
 });
 
-function boot() {
-  /* Prepare point array for globe.
-     On the globe, 47k dots is fine but we lightly jitter them so they
-     don't all stack into a single texel at low zoom. */
-  const pts = DATA.map(d => ({
-    lon: d.x, lat: d.y,
-    day: d.d,
-    bucket: bucketOf(d),
-    color: BUCKET_COLOR[bucketOf(d)],
-    size: recencySize(d),
-    d,
-  }));
+// Lazy loader for the fine hex layer. Called from the tile-view render
+// loop once zoom crosses the threshold where res 8 detail is worth the
+// ~16 MB fetch.
+let _finePending = null;
+function ensureFineHexes() {
+  if (window.SARAWAK_HEXES_FINE || _finePending) return _finePending;
+  _finePending = fetch(P('sarawak_hexes_2of3_res8.json'))
+    .then(r => r.json()).then(x => {
+      SARAWAK_HEXES_FINE = x;
+      window.SARAWAK_HEXES_FINE = x;
+      console.log(`[lazy] fine hexes loaded: ${x.length}`);
+      if (window.TileView && window.TileView.refresh) window.TileView.refresh();
+      return x;
+    }).catch(e => { console.warn('[lazy] fine hex fetch failed', e); _finePending = null; });
+  return _finePending;
+}
+window._ensureFineHexes = ensureFineHexes;
 
+// Active dot-size mode. Mutable so tweaks drawer can change it.
+let DOT_SIZE_MODE = 'recency';  // 'recency' | 'uniform'
+
+// Clusters we don't trust, identified by the per-cluster elevation +
+// slope audit on the 643 M HDBSCAN labels:
+//   c2, c11, c12, c15, c16   centroids sit at or below sea level — the
+//                            tagging rule mis-binned them as regrowth /
+//                            water_ward but they're tidal-flat /
+//                            sun-glint coastal noise. Not rendered.
+//   c1, c9, c14              tagged deforest but median elev > 300 m and
+//                            slope-p95 > 25° — topographic-illumination
+//                            false positives. Rendered as muted pale
+//                            yellow so the map stays continuous but the
+//                            user sees "flagged here, probably not real".
+const OCEAN_CLUSTERS    = new Set([2, 11, 12, 15, 16]);
+// Mountain-suspect = deforest-tagged clusters whose members sit at
+// median elevation > 200 m AND have p95 slope > 23° in the HDBSCAN ×
+// SRTM audit. Adding c4, c8, c18 on top of the initial 1/9/14 set:
+// c18 alone is the biggest deforest cluster (3.9 M px in the 27 M
+// sample) and tracks the interior foothills 1:1.
+const MOUNTAIN_CLUSTERS = new Set([1, 4, 8, 9, 14, 18]);
+const PALE_YELLOW       = '#e8d9b8';
+const REGROWTH_COLOR    = '#4fa850';  // mid-green from the cluster palette
+
+function buildPoints() {
+  // Globe hex layer. Three display cohorts:
+  //   deforest (real, non-mountain): cream → crimson density ramp
+  //   deforest (mountain-suspect):   pale yellow (kept but obviously
+  //                                  downweighted, dim / small)
+  //   regrowth (non-ocean):          green (smaller signal, shown so
+  //                                  the Regrowth chip has something
+  //                                  to toggle)
+  // Everything else (ocean, mixed, water_ward) is excluded from the
+  // globe layer — the audit showed those pools are dominated by coastal
+  // artefacts and weak-signal attractors with no geographic meaning.
+  const hexSource = SARAWAK_HEXES_COARSE;
+  if (!hexSource || !hexSource.length) return [];
+  // Three display cohorts — everything else drops:
+  //   'deforest'   real inland deforestation cluster (red ramp)
+  //   'regrowth'   real inland regrowth (green, small)
+  //   'flagged'    mountain-suspect deforest ON LAND (pale yellow).
+  //                NOT mixed, NOT coastal-regrowth — those were previously
+  //                flagged-yellow and caused the sea-surface hex blanket
+  //                users saw off the coast. Now dropped entirely.
+  // Chip-hidden clusters drop out of the ranked set entirely, so the
+  // warm-to-crimson density ramp recalibrates over just the currently-
+  // shown clusters (otherwise toggling "Severe" off leaves the rest at
+  // the pale end of the ramp, which reads as "nothing is intense").
+  const hiddenClusters = (window._state && window._state.hiddenClusters)
+    || new Set();
+  const hiddenGroups   = (window._state && window._state.hiddenGroups)
+    || new Set();
+  const visible = [];
+  for (const h of hexSource) {
+    if ((h.n || 0) === 0) continue;
+    if (OCEAN_CLUSTERS.has(h.cluster_id)) continue;
+    if (h.elev_m != null && h.elev_m < 3) continue;
+    if (h.tag === 'mixed') continue;
+    if (hiddenClusters.has(h.cluster_id)) continue;   // chip toggle
+    const isMountain = MOUNTAIN_CLUSTERS.has(h.cluster_id);
+    if (isMountain && hiddenGroups.has('suspect')) continue;
+    // Regrowth hexes dropped entirely — c3/c13 centroids are mostly
+    // coastal and the remaining inland slice is too sparse to carry
+    // a meaningful signal on the globe layer.
+    const cohort =
+        h.tag === 'deforest' && isMountain ? 'flagged'
+      : h.tag === 'deforest'               ? 'deforest'
+      :                                      null;
+    if (!cohort) continue;
+    h._cohort = cohort;
+    visible.push(h);
+  }
+  // Rank density colour only across the real-deforest cohort so the
+  // pale-yellow 'flagged' group doesn't pull the ramp.
+  const rankable = visible.filter(h => h._cohort === 'deforest');
+  const rankOf = new Map();
+  const sorted = [...rankable].sort((a, b) => (a.n || 0) - (b.n || 0));
+  const denom = Math.max(1, sorted.length - 1);
+  for (let i = 0; i < sorted.length; i++) rankOf.set(sorted[i], i / denom);
+  return visible.map(h => {
+    const cohort = h._cohort;
+    const t = rankOf.get(h) ?? 0;
+    const color = cohort === 'flagged'  ? PALE_YELLOW
+                : cohort === 'regrowth' ? REGROWTH_COLOR
+                :                         hexDensityColor(t);
+    return {
+      lon: h.lon, lat: h.lat,
+      color,
+      size: cohort === 'flagged'  ? 0.5
+          : cohort === 'regrowth' ? 0.7
+          : (DOT_SIZE_MODE === 'uniform' ? 0.9 : (0.45 + t * 1.2)),
+      alpha: cohort === 'flagged'  ? 0.3
+           : cohort === 'regrowth' ? 0.7
+           : (0.45 + 0.4 * t),
+      bucket: 'sarawak',
+      layer: 'hex',
+      h3: h.h3, y: h.y, n: h.n, _rankT: t,
+      tag: h.tag,
+      cluster_id: h.cluster_id,
+      cohort,
+    };
+  });
+}
+
+function boot() {
   globe = Globe.init(document.getElementById('globe-mount'), {
     onReady: () => document.getElementById('loader').classList.add('gone'),
   });
-  globe.setPoints(pts);
-  globe.setPilotBox(MANIFEST.bbox);
+  globe.setPoints(buildPoints());
+  // No more pilot bbox — the whole state is the subject now.
+  // (When we add a zoom-in detail view, it'll be centred on whichever hex the
+  //  user clicks, not hard-coded to Baram.)
+  // Expose for UI toggle
+  window._rebuildGlobePoints = () => globe.setPoints(buildPoints());
 
-  // Initial camera: look at earth with Sarawak visible
+  // Initial camera: full-globe view so the title + context read first.
+  // Flying in (via the Baram button or user zoom) reveals per-pixel detail.
   globe.flyTo(114.05, 4.05, 3.2, 0);
 
-  // Stats
-  const lost = DATA.filter(d => bucketOf(d)==='deforestation' || bucketOf(d)==='oilpalm').length;
-  const lostHa = (lost * 0.04).toFixed(0);
-  const pilotHa = 10000;
-  const pct = (lost * 0.04 / pilotHa * 100).toFixed(1);
-  document.getElementById('stat-ha').textContent = Number(lostHa).toLocaleString();
-  document.getElementById('stat-ha-sub').textContent = `${pct}% of the 10×10 km tile`;
-  document.getElementById('stat-pix').textContent = MANIFEST.n_detections.toLocaleString();
+  // Pilot-era stats (hectares lost / category counts) are derived from the
+  // DATA pilot array and the stat-card DOM — both commented out in Phase 1,
+  // so nothing to update here. Restored when cluster labels are applied.
 
-  // Category counts
-  const counts = {deforestation:0,oilpalm:0,regrowth:0};
-  for (const d of DATA) counts[bucketOf(d)]++;
-  for (const k in counts) document.getElementById(`ct-${k}`).textContent = counts[k].toLocaleString();
-
-  // Wire chips
+  // Chip groups — each one toggles a set of cluster IDs on/off. Groups
+  // are assigned by cluster rank within the visible-deforest cohort
+  // (biggest spectral regime first). Mountain-suspect and mixed-tag
+  // hexes fall into 'suspect' (pale yellow in the hex layer).
+  const _def = CLUSTER_META.clusters
+    .filter(c => c.tag === 'deforest'
+      && !OCEAN_CLUSTERS.has(c.id)
+      && !MOUNTAIN_CLUSTERS.has(c.id))
+    .sort((a, b) => b.n - a.n);
+  const GROUPS = {
+    severe:   _def.slice(0, 1).map(c => c.id),      // biggest cluster
+    heavy:    _def.slice(1, 2).map(c => c.id),      // 2nd
+    moderate: _def.slice(2).map(c => c.id),         // rest
+    suspect:  [...MOUNTAIN_CLUSTERS],
+  };
+  const GROUP_OF = {};
+  for (const [g, ids] of Object.entries(GROUPS)) {
+    for (const id of ids) GROUP_OF[id] = g;
+  }
+  window._GROUPS = GROUPS;
+  window._GROUP_OF = GROUP_OF;
+  // Per-group hidden state. Clicking a chip toggles the whole group.
+  const hiddenGroups = new Set();
+  const hiddenClusters = new Set();        // derived from hiddenGroups
+  window._hiddenClusters = hiddenClusters;
+  // Legacy alias so pre-existing chip-tag filters don't crash.
   const hiddenCats = new Set();
+  function recomputeHiddenClusters() {
+    hiddenClusters.clear();
+    for (const g of hiddenGroups) for (const id of GROUPS[g] || []) hiddenClusters.add(id);
+  }
   document.querySelectorAll('.cat-chip').forEach(el => {
     el.addEventListener('click', () => {
-      const c = el.dataset.cat;
-      if (hiddenCats.has(c)) hiddenCats.delete(c); else hiddenCats.add(c);
+      const g = el.dataset.group;
+      if (!g) return;
+      if (hiddenGroups.has(g)) hiddenGroups.delete(g); else hiddenGroups.add(g);
       el.classList.toggle('off');
+      recomputeHiddenClusters();
       applyFilter();
+      if (window._rebuildGlobePoints) window._rebuildGlobePoints();
+      // Re-sync the stacked histogram. Prefer the viewport path when tile
+      // view is open so the stack keeps its current (not-global) shape —
+      // going through null→globalYT would flash the bars fatter while the
+      // tile view's debounced update catches up.
+      if (window.TileView && window.TileView.isOpen() && window._refreshViewportHistNow) {
+        window._refreshViewportHistNow();
+      } else if (window._refreshViewportHist) {
+        window._refreshViewportHist(null);
+      }
     });
   });
 
+  // Chip counts per severity group — hectares of clearing each group
+  // represents. 10 m pixel = 0.01 ha.
+  const fmtHa = ha =>
+    ha >= 1_000_000 ? (ha / 1_000_000).toFixed(1) + 'M ha' :
+    ha >= 1_000     ? (ha / 1_000).toFixed(ha >= 10_000 ? 0 : 1) + 'k ha' :
+                      ha.toFixed(0) + ' ha';
+  window._fmtHa = fmtHa;
+  function refreshChipCounts() {
+    if (!CLUSTER_META || !CLUSTER_META.clusters) return;
+    const byId = Object.fromEntries(CLUSTER_META.clusters.map(c => [c.id, c]));
+    for (const g of Object.keys(GROUPS)) {
+      const n = GROUPS[g].reduce((s, id) => s + (byId[id]?.n || 0), 0);
+      const el = document.getElementById(`ct-${g}`);
+      if (el) el.textContent = fmtHa(n * 0.01);
+    }
+  }
+  refreshChipCounts();
+
   // Filter state
+  //   yearRange — inclusive [y0, y1]; rendered pixels/hexes with year outside
+  //               this band are hidden. Default covers the full 2015-2024
+  //               scan window. Used by both the globe hex layer (h.y =
+  //               per-hex median year) and the tile-view per-pixel layer
+  //               (yr[i] + 2015 per bin tile).
   const state = {
-    tRange: [MANIFEST.t_min_day, MANIFEST.t_max_day],
+    yearRange: [2015, 2024],
     hiddenCats,
-    umapRange: null,   // [[u0,v0],[u1,v1]] in UMAP-space, or null
+    hiddenGroups,
+    hiddenClusters,
   };
   window._state = state;
 
   function passes(p) {
-    if (state.hiddenCats.has(p.bucket)) return false;
-    if (p.day < state.tRange[0] || p.day > state.tRange[1]) return false;
-    if (state.umapRange) {
-      const [[u0,v0],[u1,v1]] = state.umapRange;
-      if (p.d.ux < u0 || p.d.ux > u1 || p.d.uy < v0 || p.d.uy > v1) return false;
+    if (p.layer === 'hex') {
+      if (p.cluster_id != null && hiddenClusters.has(p.cluster_id)) return false;
+      // Special case: 'flagged' cohort (pale yellow) is gated by the
+      // 'suspect' chip, not by its cluster id directly.
+      if (p.cohort === 'flagged' && hiddenGroups.has('suspect')) return false;
+      if (p.y != null && (p.y < state.yearRange[0] || p.y > state.yearRange[1])) return false;
+      return true;
     }
     return true;
   }
   function applyFilter() {
     globe.setVisibility(passes);
     if (window.TileView && window.TileView.isOpen()) window.TileView.setVisible(passes);
-    if (drawUmap._repaint) drawUmap._repaint();
   }
   window._applyFilter = applyFilter;
   window._passes = passes;
-  window._points = pts;
+  window._points = buildPoints();
 
-  // Timeline histogram
   drawHistogram();
-  // Hover tooltip + click inspector
   setupHover();
   setupClick();
-  // Play button
   setupPlay();
   // Fly button
   // Fly button — animate on the globe to the pilot region, then cross-fade
   // into a live satellite-tile map where the user can zoom to pixel scale.
-  document.getElementById('fly-btn').addEventListener('click', async () => {
-    globe.setAutoRotate(false);
-    await globe.flyTo(114.05, 4.05, 1.12, 2200);
-    openTileView();
+  let _flying = false;
+  async function flyToBorneo() {
+    if (_flying || document.body.classList.contains('in-tile-view')) return;
+    _flying = true;
+    try {
+      globe.setAutoRotate(false);
+      await globe.flyTo(114.05, 4.05, 1.12, 2200);
+      openTileView();
+    } finally { _flying = false; }
+  }
+  document.getElementById('fly-btn').addEventListener('click', flyToBorneo);
+  // Click anywhere on the globe canvas also flies in. Drag-to-rotate
+  // is disabled (see globe.js) so clicks are unambiguous.
+  document.getElementById('globe-mount').addEventListener('click', () => {
+    if (document.body.classList.contains('in-tile-view')) return;
+    flyToBorneo();
   });
   document.getElementById('back-to-globe').addEventListener('click', () => {
     closeTileView();
@@ -876,7 +1201,11 @@ function boot() {
   // Tweaks
   setupTweaks();
   // Zoom indicator
+  // Re-enabled: it now just drives the title fade and the auto-tile-view
+  // transition (no on-screen zoom bar any more).
   setupZoomIndicator();
+  // Pan/zoom console buttons (active on both globe and tile view)
+  setupTileConsole();
   // Range label
   updateRangeLabel();
 }
@@ -888,161 +1217,306 @@ function recencySize(d) {
 function uniformSize() { return 1.1; }
 
 /* ═════════════ Histogram + brush ═════════════ */
+// Year-based stacked histogram. By default shows the global per-year ×
+// per-tag counts from CLUSTER_META.clusters[k].year_hist. When the
+// tile-view is open, tile-view.js pushes a viewport-only aggregate to
+// window._viewportYearHist and we repaint the bars against that — so the
+// chart reads as "what's in my current map view", not "Borneo total".
+// The brush selects a year band bound to window._state.yearRange and
+// re-applied to all layers through passes().
 function drawHistogram() {
   const svg = d3.select('#hist-svg');
+  if (!CLUSTER_META || !CLUSTER_META.clusters) return;
+
+  const YEAR_LO = 2015, YEAR_HI = 2024;
+  // Stack layers mirror the four chips: severe / heavy / moderate / suspect.
+  // Each chip maps to a fixed set of clusters (window._GROUPS), and the
+  // swatch colors come from the chip DOM so stack === chip exactly.
+  const TAGS = ['severe', 'heavy', 'moderate', 'suspect'];
+  const TAG_COLOR = {
+    severe:   '#c65438',
+    heavy:    '#d46d45',
+    moderate: '#e7b27e',
+    suspect:  '#e8d9b8',       // PALE_YELLOW
+  };
+  // Precompute cluster_id → group lookup once so both the global + viewport
+  // aggregators can route a cluster's count into the right stack layer.
+  const GROUPS = window._GROUPS || {};
+  const GROUP_OF = {};
+  for (const [g, ids] of Object.entries(GROUPS)) {
+    for (const id of ids) GROUP_OF[id] = g;
+  }
+
+  // Global aggregate — { year: { severe: N, heavy: N, ... } }. We do NOT
+  // filter by chip state here; hiding a class should make its layer
+  // disappear visually but leave the other layers at the same vertical
+  // position (and the y-axis on the same scale). Filtering inside the
+  // aggregate would rescale the whole chart each time the user toggled
+  // a chip, which reads as "the chart jumps/fattens/shrinks on toggle".
+  // Chip-state application happens at paint time in renderBars.
+  function globalYT() {
+    const yt = {};
+    for (let y = YEAR_LO; y <= YEAR_HI; y++) {
+      yt[y] = {};
+      for (const k of TAGS) yt[y][k] = 0;
+    }
+    for (const c of CLUSTER_META.clusters) {
+      if (c.tag !== 'deforest') continue;
+      if (OCEAN_CLUSTERS.has(c.id)) continue;
+      const group = GROUP_OF[c.id];
+      if (!group) continue;
+      for (const [ys, n] of Object.entries(c.year_hist || {})) {
+        const yy = +ys;
+        if (yt[yy] != null) yt[yy][group] += n;
+      }
+    }
+    return yt;
+  }
+
+  function buildBinData(yt) {
+    const out = [];
+    for (let y = YEAR_LO; y <= YEAR_HI; y++) {
+      const row = { year: y };
+      for (const k of TAGS) row[k] = 0;
+      const raw = yt[y] || {};
+      // Tolerate both schemas: group-keyed (from globalYT) and per-cluster
+      // ('cN' keys from the tile-view viewport hist). Unknown keys fold
+      // into their group; genuinely unmapped keys drop silently.
+      for (const [key, n] of Object.entries(raw)) {
+        if (key in row) { row[key] += n; continue; }
+        if (key.charCodeAt(0) === 99 /* 'c' */) {
+          const g = GROUP_OF[+key.slice(1)];
+          if (g && g in row) row[g] += n;
+        }
+      }
+      row.total = TAGS.reduce((s, t) => s + row[t], 0);
+      out.push(row);
+    }
+    return out;
+  }
+
+  let binData = buildBinData(globalYT());
+  // Cached structural selections — the full draw() only runs on init + on
+  // resize. Viewport updates from tile-view only rebuild the stack paths
+  // (via renderBars below), so the brush + overlay stay put. Without this
+  // split, every pan in the tile view rebuilt the brush and caused the
+  // histogram to flicker/disappear.
+  let cachedLayout = null;
+
   function draw() {
     const bb = svg.node().getBoundingClientRect();
     const W = bb.width || 800, H = bb.height || 86;
+    // Invalidate the cached bars-renderer before wiping: if a viewport
+    // update races a resize, it should fall back to a full redraw rather
+    // than paint into a detached gArea.
+    cachedLayout = null;
     svg.attr('viewBox', `0 0 ${W} ${H}`); svg.selectAll('*').remove();
 
-    const m = {l: 8, r: 8, t: 8, b: 22};
-    const x = d3.scaleLinear().range([m.l, W-m.r])
-      .domain([MANIFEST.t_min_day, MANIFEST.t_max_day]);
+    const m = { l: 14, r: 14, t: 8, b: 22 };
+    const x = d3.scaleLinear()
+      .domain([YEAR_LO, YEAR_HI + 1])        // +1 so last year column has width
+      .range([m.l, W - m.r]);
 
-    const binCount = Math.max(80, Math.min(180, Math.floor((W - m.l - m.r) / 5)));
-    const bins = d3.bin().domain(x.domain()).thresholds(binCount).value(d => d.d)(DATA);
-    const keys = ['deforestation','oilpalm','regrowth'];
-    const binData = bins.map(b => {
-      const o = {x0:b.x0, x1:b.x1, xm:(b.x0+b.x1)/2};
-      keys.forEach(k => o[k] = 0);
-      for (const d of b) o[bucketOf(d)]++;
-      o.total = keys.reduce((s,k)=>s+o[k],0);
-      return o;
-    });
-    const yMax = d3.max(binData, b => b.total) || 1;
-    const y = d3.scaleLinear().domain([0, yMax]).range([H-m.b, m.t]);
-
-    // Defs: a soft gradient per category
     const defs = svg.append('defs');
-    keys.forEach(k => {
-      const grd = defs.append('linearGradient')
-        .attr('id', `grd-${k}`).attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
-      grd.append('stop').attr('offset','0%').attr('stop-color', BUCKET_COLOR[k]).attr('stop-opacity',0.85);
-      grd.append('stop').attr('offset','100%').attr('stop-color', BUCKET_COLOR[k]).attr('stop-opacity',0.05);
+    TAGS.forEach(t => {
+      const g = defs.append('linearGradient')
+        .attr('id', `grd-${t}`).attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 1);
+      g.append('stop').attr('offset', '0%').attr('stop-color', TAG_COLOR[t]).attr('stop-opacity', 0.85);
+      g.append('stop').attr('offset', '100%').attr('stop-color', TAG_COLOR[t]).attr('stop-opacity', 0.08);
     });
 
-    // Year tick lines
-    const t0ref = new Date(MANIFEST.t0_day);
-    const years = [];
-    for (let yy = 2016; yy <= 2025; yy++) {
-      const dt = new Date(Date.UTC(yy, 0, 1));
-      const day = Math.round((dt - t0ref) / 86400000);
-      if (day >= MANIFEST.t_min_day && day <= MANIFEST.t_max_day) years.push({ yy, day });
-    }
+    // Year gridlines
+    const years = binData.map(b => b.year);
     svg.append('g').selectAll('line').data(years).enter().append('line')
-      .attr('class','hist-tick-line')
-      .attr('x1', d => x(d.day)).attr('x2', d => x(d.day))
+      .attr('class', 'hist-tick-line')
+      .attr('x1', d => x(d)).attr('x2', d => x(d))
       .attr('y1', m.t).attr('y2', H - m.b);
 
-    // Stacked smooth areas (bottom → top: deforestation, oilpalm, regrowth)
-    const stack = d3.stack().keys(keys)(binData);
-    const area = d3.area()
-      .x(d => x(d.data.xm))
-      .y0(d => y(d[0]))
-      .y1(d => y(d[1]))
-      .curve(d3.curveMonotoneX);
-    const gArea = svg.append('g').attr('class','hist-area');
-    stack.forEach(s => {
-      gArea.append('path').attr('d', area(s))
-        .attr('fill', `url(#grd-${s.key})`);
-      // Thin line on top of each band for definition
-      const topLine = d3.line()
-        .x(d => x(d.data.xm))
-        .y(d => y(d[1]))
+    // Stack paths live in this group so renderBars can wipe and rebuild
+    // just the paths without disturbing the brush or axis elements above.
+    const gArea = svg.append('g').attr('class', 'hist-area');
+    function renderBars() {
+      // yMax is computed over ALL groups (regardless of chip state) so
+      // toggling a class changes WHICH bands are visible, not the y-axis
+      // scale. Otherwise every toggle would re-scale the chart and the
+      // user reads that as "the histogram just became fatter/thinner".
+      const yMax = d3.max(binData, d => d.total) || 1;
+      const yScale = d3.scaleLinear().domain([0, yMax]).range([H - m.b, m.t]);
+      const stack = d3.stack().keys(TAGS)(binData);
+      const area = d3.area()
+        .x(d => x(d.data.year + 0.5))
+        .y0(d => yScale(d[0]))
+        .y1(d => yScale(d[1]))
         .curve(d3.curveMonotoneX);
-      gArea.append('path').attr('d', topLine(s))
-        .attr('fill','none').attr('stroke', BUCKET_COLOR[s.key])
-        .attr('stroke-width', 1).attr('opacity', 0.9);
-    });
+      const hiddenGroups =
+        (window._state && window._state.hiddenGroups) || new Set();
+      const visOf = s => hiddenGroups.has(s.key) ? 'hidden' : 'visible';
+      // D3 key-join keeps one <path> per group across viewport updates.
+      // The old "wipe-and-readd" pattern flashed empty paths for a frame
+      // whenever the tile view pushed a new hist, which is most of why
+      // the histogram looked like it was disappearing during panning.
+      const fills = gArea.selectAll('path.hist-fill').data(stack, s => s.key);
+      fills.exit().remove();
+      fills.enter().append('path').attr('class', 'hist-fill')
+        .merge(fills)
+        .attr('fill', s => `url(#grd-${s.key})`)
+        .attr('visibility', visOf)
+        .attr('d', s => area(s));
+      const topLineFor = s => d3.line()
+        .x(d => x(d.data.year + 0.5)).y(d => yScale(d[1]))
+        .curve(d3.curveMonotoneX)(s);
+      const tops = gArea.selectAll('path.hist-top').data(stack, s => s.key);
+      tops.exit().remove();
+      tops.enter().append('path').attr('class', 'hist-top')
+        .attr('fill', 'none').attr('stroke-width', 1).attr('opacity', 0.9)
+        .merge(tops)
+        .attr('stroke', s => TAG_COLOR[s.key])
+        .attr('visibility', visOf)
+        .attr('d', topLineFor);
+    }
+    renderBars();
+    // Expose for the viewport-update path — _refreshViewportHist below
+    // flips binData in place and calls this instead of a full draw().
+    cachedLayout = { renderBars };
 
-    // Baseline
-    svg.append('line').attr('class','hist-baseline')
-      .attr('x1', m.l).attr('x2', W-m.r).attr('y1', H-m.b).attr('y2', H-m.b);
+    svg.append('line').attr('class', 'hist-baseline')
+      .attr('x1', m.l).attr('x2', W - m.r).attr('y1', H - m.b).attr('y2', H - m.b);
 
-    // Year labels under baseline
     svg.append('g').selectAll('text').data(years).enter().append('text')
-      .attr('class', d => 'hist-year-tick' + (d.yy % 2 === 0 ? ' hist-year-major' : ''))
-      .attr('x', d => x(d.day) + 4).attr('y', H - m.b + 14)
-      .text(d => `’${String(d.yy).slice(-2)}`);
+      .attr('class', d => 'hist-year-tick' + (d % 2 === 0 ? ' hist-year-major' : ''))
+      .attr('x', d => x(d) + 4).attr('y', H - m.b + 14)
+      .text(d => `’${String(d).slice(-2)}`);
 
-    // Brush
-    // Brush. RAF-throttle — the handler fires per-mousemove and the filter
-    // pass is the most expensive thing per frame, so coalesce multiple
-    // mouse events into a single frame's worth of work.
-    let brushRaf = null, pendingRange = null;
-    function flushBrush() {
-      brushRaf = null;
-      if (!pendingRange) return;
-      window._state.tRange = pendingRange;
-      window._applyFilter();
-      updateRangeLabel();
-      drawOverlay();
-      pendingRange = null;
+    // Brush is split into two phases for smoothness:
+    //   'brush' — fires during drag. We ONLY move the overlay edges (stateful
+    //             .attr updates, no remove-and-readd). Range is kept in pixel
+    //             space (ev.selection) so the bar tracks the cursor exactly,
+    //             with no "integer year" snapping that'd cause visual stutter.
+    //   'end'   — fires on mouseup. Snap to integer years, write state,
+    //             re-apply the expensive filter to globe + tile view.
+    const overlayG = svg.append('g').attr('class', 'hist-overlay').attr('pointer-events', 'none');
+    // One-time allocate overlay elements — further updates are just .attr()
+    // on these cached selections, avoiding the per-drag DOM churn that made
+    // the drag feel laggy.
+    const dimL = overlayG.append('rect').attr('class', 'hist-dim');
+    const dimR = overlayG.append('rect').attr('class', 'hist-dim');
+    const edgeL = overlayG.append('line').attr('class', 'hist-edge');
+    const edgeR = overlayG.append('line').attr('class', 'hist-edge');
+    const gripL = overlayG.append('circle').attr('class', 'hist-edge-grip');
+    const gripR = overlayG.append('circle').attr('class', 'hist-edge-grip');
+    const glyphL = overlayG.append('text').attr('class', 'hist-edge-grip-glyph').text('‹ ›');
+    const glyphR = overlayG.append('text').attr('class', 'hist-edge-grip-glyph').text('‹ ›');
+    const yT = m.t - 2, yB = H - m.b, yMid = (yT + yB) / 2;
+
+    function paintOverlay(x0, x1) {
+      dimL.attr('x', m.l).attr('y', yT).attr('width', Math.max(0, x0 - m.l)).attr('height', yB - yT);
+      dimR.attr('x', x1).attr('y', yT).attr('width', Math.max(0, (W - m.r) - x1)).attr('height', yB - yT);
+      edgeL.attr('x1', x0).attr('x2', x0).attr('y1', yT).attr('y2', yB);
+      edgeR.attr('x1', x1).attr('x2', x1).attr('y1', yT).attr('y2', yB);
+      gripL.attr('cx', x0).attr('cy', yMid).attr('r', 13);
+      gripR.attr('cx', x1).attr('cy', yMid).attr('r', 13);
+      glyphL.attr('x', x0).attr('y', yMid);
+      glyphR.attr('x', x1).attr('y', yMid);
     }
-    const brush = d3.brushX().extent([[m.l, m.t-2], [W-m.r, H-m.b]])
-      .on('brush end', ev => {
+
+    function paintFromRange(range) {
+      paintOverlay(x(range[0]), x(range[1] + 1));
+    }
+
+    // RAF-coalesce the drag handler. Trackpads on high-refresh displays
+    // fire pointermove at 120+ Hz; without this we'd repaint the overlay
+    // 2× per frame, which is pure waste. With RAF we repaint once per
+    // frame at the exact rate the browser is compositing at anyway.
+    let dragRaf = null, pendingSel = null;
+    function flushDragPaint() {
+      dragRaf = null;
+      if (!pendingSel) return;
+      paintOverlay(pendingSel[0], pendingSel[1]);
+      pendingSel = null;
+    }
+    const brush = d3.brushX().extent([[m.l, m.t - 2], [W - m.r, H - m.b]])
+      .on('brush', ev => {
         if (!ev.sourceEvent) return;
-        if (!ev.selection) {
-          pendingRange = [MANIFEST.t_min_day, MANIFEST.t_max_day];
-        } else {
-          pendingRange = ev.selection.map(x.invert);
-        }
-        if (!brushRaf) brushRaf = requestAnimationFrame(flushBrush);
+        pendingSel = ev.selection || [x(YEAR_LO), x(YEAR_HI + 1)];
+        if (!dragRaf) dragRaf = requestAnimationFrame(flushDragPaint);
+      })
+      .on('end', ev => {
+        if (!ev.sourceEvent) return;
+        // On release: keep the exact fractional year range the user picked
+        // — the hex / pixel filters round naturally since `year` is int.
+        // Snapping to integer years on 'end' was causing a visible "jump"
+        // of the overlay bar when the user released between two year ticks.
+        const range = ev.selection
+          ? [Math.max(YEAR_LO, x.invert(ev.selection[0])),
+             Math.min(YEAR_HI + 1, x.invert(ev.selection[1])) - 1]
+          : [YEAR_LO, YEAR_HI];
+        window._state.yearRange = range;
+        updateRangeLabel();
+        window._applyFilter();
       });
-    const brushG = svg.append('g').attr('class','brush').call(brush);
-    const overlayG = svg.append('g').attr('class','hist-overlay').attr('pointer-events','none');
+    const brushG = svg.append('g').attr('class', 'brush').call(brush);
 
-    function drawOverlay() {
-      overlayG.selectAll('*').remove();
-      const [t0, t1] = window._state.tRange;
-      const x0 = x(t0), x1 = x(t1);
-      const yT = m.t - 2, yB = H - m.b;
-      const yMid = (yT + yB) / 2;
-      // Dim everything outside the range
-      if (x0 > m.l) overlayG.append('rect').attr('class','hist-dim')
-        .attr('x', m.l).attr('y', yT).attr('width', x0 - m.l).attr('height', yB - yT);
-      if (x1 < W - m.r) overlayG.append('rect').attr('class','hist-dim')
-        .attr('x', x1).attr('y', yT).attr('width', (W - m.r) - x1).attr('height', yB - yT);
-      // Chunky white vertical bar + circular grip on each edge, mirroring
-      // the before/after slider so the interaction reads the same.
-      [x0, x1].forEach(xx => {
-        overlayG.append('line').attr('class','hist-edge')
-          .attr('x1', xx).attr('x2', xx).attr('y1', yT).attr('y2', yB);
-        overlayG.append('circle').attr('class','hist-edge-grip')
-          .attr('cx', xx).attr('cy', yMid).attr('r', 13);
-        overlayG.append('text').attr('class','hist-edge-grip-glyph')
-          .attr('x', xx).attr('y', yMid).text('‹ ›');
-      });
+    if (window._state && window._state.yearRange) {
+      const [lo, hi] = window._state.yearRange;
+      brushG.call(brush.move, [x(lo), x(hi + 1)]);
     }
+    paintFromRange(window._state.yearRange);
+    updateRangeLabel();
 
-    if (window._state && window._state.tRange) {
-      brushG.call(brush.move, window._state.tRange.map(x));
-    }
-    drawOverlay();
-
-    // Expose a cheap "just move the brush" updater so the play-animation
-    // and external scrubbers don't have to rebuild the entire histogram.
-    window._moveBrush = (tRange) => {
-      brushG.call(brush.move, tRange.map(x));
-      drawOverlay();
+    window._moveBrush = (range) => {
+      const [lo, hi] = range;
+      brushG.call(brush.move, [x(lo), x(hi + 1)]);
+      paintFromRange(range);
     };
   }
+
+  // External hook: tile-view pushes a per-year × per-cluster aggregate
+  // for the current viewport. null ⇒ revert to the global dataset.
+  // Only repaints the stack paths; the brush / axis / overlay stay put
+  // so the chart doesn't flicker every time the user pans the tile view.
+  window._refreshViewportHist = (yt) => {
+    binData = buildBinData(yt || globalYT());
+    if (cachedLayout && cachedLayout.renderBars) cachedLayout.renderBars();
+    else draw();
+    const vp = document.getElementById('vp-ha');
+    if (vp) {
+      const hidden = (window._state && window._state.hiddenGroups) || new Set();
+      let px = 0;
+      for (const row of binData) {
+        for (const k of TAGS) {
+          if (hidden.has(k)) continue;
+          px += row[k] || 0;
+        }
+      }
+      const fmtHa = window._fmtHa || (ha => Math.round(ha) + ' ha');
+      vp.textContent = yt ? fmtHa(px * 0.01) : '—';
+    }
+  };
+
   draw();
   window.addEventListener('resize', draw);
 }
 
 function updateRangeLabel() {
-  const [t0, t1] = window._state.tRange;
-  const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(t0));
-  const d1 = new Date(MANIFEST.t0_day); d1.setDate(d1.getDate() + Math.round(t1));
-  const f = d3.timeFormat('%b %Y');
-  document.getElementById('range-label').textContent = `${f(d0)} → ${f(d1)}`;
+  const [t0, t1] = window._state.yearRange;
+  const el = document.getElementById('range-label');
+  if (!el) return;
+  // Fractional years are rendered as year+month for readability. The filter
+  // applied to pixels / hexes compares against integer `year`, so e.g.
+  // [2018.4, 2020.7] includes years 2019 and 2020 (floor on upper bound).
+  const fmt = t => {
+    const yr = Math.floor(t);
+    const mo = Math.round((t - yr) * 12);
+    if (mo === 0) return `${yr}`;
+    const mnames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${mnames[Math.min(11, mo)]} ${yr}`;
+  };
+  el.textContent = Math.abs(t0 - Math.round(t0)) < 0.05 && Math.abs(t1 - Math.round(t1)) < 0.05
+    ? `${Math.round(t0)} – ${Math.round(t1)}`
+    : `${fmt(t0)} – ${fmt(t1)}`;
 }
 
 /* ═════════════ Hover tooltip ═════════════ */
-function labelFor(b) {
-  return b === 'deforestation' ? 'Deforestation' : b === 'oilpalm' ? 'Oil-palm conversion' : 'Reforestation';
-}
 function setupHover() {
   const tt = document.getElementById('tooltip');
   const mount = document.getElementById('globe-mount');
@@ -1054,12 +1528,10 @@ function setupHover() {
       const p = globe.pickPoint(e.clientX, e.clientY, 14);
       mount.style.cursor = p ? 'pointer' : 'grab';
       if (!p) { tt.style.visibility = 'hidden'; return; }
-      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
       tt.innerHTML = `
-        <div class="t-head">${labelFor(p.bucket)}</div>
-        <div class="t-meta">${d3.timeFormat('%Y · %b %d')(d0)}</div>
+        <div class="t-head">Borneo hex · ${Math.round(p.n * 0.01).toLocaleString()} ha changed</div>
+        <div class="t-meta">median year ${p.y}</div>
         <div class="t-meta">${p.lat.toFixed(4)}°N &nbsp; ${p.lon.toFixed(4)}°E</div>
-        <div class="t-meta" style="opacity:.7;margin-top:4px">click to pin</div>
       `;
       tt.style.left = (e.clientX + 14) + 'px';
       tt.style.top  = (e.clientY + 14) + 'px';
@@ -1083,11 +1555,10 @@ function setupClick() {
     if (Math.hypot(dx,dy) > 5 || dt > 400) return; // it was a drag
     const p = globe.pickPoint(e.clientX, e.clientY, 14);
     if (!p) { ins.style.visibility = 'hidden'; return; }
-    const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
-    document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>${labelFor(p.bucket)}`;
-    document.getElementById('ins-when').textContent = d3.timeFormat('%Y %b %d')(d0);
+    document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>Borneo hex`;
+    document.getElementById('ins-when').textContent = `median change year ${p.y}`;
     document.getElementById('ins-where').textContent = `${p.lat.toFixed(4)}°N ${p.lon.toFixed(4)}°E`;
-    document.getElementById('ins-ndvi').textContent = p.d.n.toFixed(3);
+    document.getElementById('ins-ndvi').textContent = `${Math.round(p.n * 0.01).toLocaleString()} ha changed`;
     ins.style.left = Math.min(window.innerWidth - 310, e.clientX + 16) + 'px';
     ins.style.top  = Math.min(window.innerHeight - 200, e.clientY + 16) + 'px';
     ins.style.visibility = 'visible';
@@ -1099,25 +1570,32 @@ function setupClick() {
 let playing = false;
 function setupPlay() {
   const btn = document.getElementById('play-btn');
+  if (!btn) return;
   btn.addEventListener('click', () => {
     if (playing) { playing = false; btn.classList.remove('playing'); btn.querySelector('.lbl').textContent = 'Play timeline'; return; }
     playing = true; btn.classList.add('playing'); btn.querySelector('.lbl').textContent = 'Pause';
-    const tMin = MANIFEST.t_min_day, tMax = MANIFEST.t_max_day;
+    const yMin = 2015, yMax = 2024;
     const dur = 18000, start = performance.now();
     function step(now) {
       if (!playing) return;
       const k = (now - start) / dur;
       if (k >= 1) {
         playing = false; btn.classList.remove('playing'); btn.querySelector('.lbl').textContent = 'Play timeline';
-        window._state.tRange = [tMin, tMax];
+        window._state.yearRange = [yMin, yMax];
         window._applyFilter();
-        if (window._moveBrush) window._moveBrush(window._state.tRange);
+        if (window._moveBrush) window._moveBrush(window._state.yearRange);
         updateRangeLabel();
         return;
       }
-      window._state.tRange = [tMin, tMin + (tMax-tMin)*k];
-      window._applyFilter();
-      if (window._moveBrush) window._moveBrush(window._state.tRange);
+      // Continuous fractional yHi → brush glides smoothly. But
+      // applyFilter is expensive (35 k-hex visibility scan + tile-view
+      // re-render), so we only re-apply on integer-year boundaries —
+      // between those the filter is identical because `year` is int.
+      const yHi = Math.min(yMax + 0.999, yMin + (yMax - yMin + 1) * k);
+      const prevYHi = window._state.yearRange[1];
+      window._state.yearRange = [yMin, yHi];
+      if (Math.floor(yHi) !== Math.floor(prevYHi)) window._applyFilter();
+      if (window._moveBrush) window._moveBrush(window._state.yearRange);
       updateRangeLabel();
       requestAnimationFrame(step);
     }
@@ -1132,125 +1610,82 @@ function setupDrawer() {
   // don't error.
 }
 
-function drawUmap() {
-  const svg = d3.select('#umap-svg');
-  const canvas = document.getElementById('umap-canvas');
-  const bb = svg.node().getBoundingClientRect();
-  const W = bb.width || 500, H = bb.height || 340;
-  svg.attr('viewBox', `0 0 ${W} ${H}`); svg.selectAll('*').remove();
-  const dpr = devicePixelRatio || 1;
-  canvas.width = W*dpr; canvas.height = H*dpr;
-  canvas.style.width = W+'px'; canvas.style.height = H+'px';
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
-
-  const m = {l:42,r:14,t:12,b:32};
-  const x = d3.scaleLinear().range([m.l, W-m.r])
-    .domain(d3.extent(DATA, d=>d.ux)).nice();
-  const y = d3.scaleLinear().range([H-m.b, m.t])
-    .domain(d3.extent(DATA, d=>d.uy)).nice();
-  svg.append('g').attr('class','axis axis-dark')
-    .attr('transform',`translate(0,${H-m.b})`).call(d3.axisBottom(x).ticks(6));
-  svg.append('g').attr('class','axis axis-dark')
-    .attr('transform',`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5));
-
-  // ── Points: dim any that the current umapRange brush excludes.
-  const ur = window._state && window._state.umapRange;
-  ctx.globalAlpha = 0.72;
-  for (const d of DATA) {
-    const b = bucketOf(d);
-    if (window._state.hiddenCats.has(b)) continue;
-    if (d.d < window._state.tRange[0] || d.d > window._state.tRange[1]) continue;
-    const inside = !ur || (d.ux >= ur[0][0] && d.ux <= ur[1][0] && d.uy >= ur[0][1] && d.uy <= ur[1][1]);
-    ctx.globalAlpha = inside ? 0.78 : 0.10;
-    ctx.fillStyle = BUCKET_COLOR[b];
-    ctx.beginPath();
-    ctx.arc(x(d.ux), y(d.uy), 1.2, 0, Math.PI*2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  // ── Brush to lasso a region of UMAP-space.
-  const clearLink = document.getElementById('umap-clear');
-  const brush = d3.brush()
-    .extent([[m.l, m.t], [W - m.r, H - m.b]])
-    .on('brush end', (ev) => {
-      const s = ev.selection;
-      if (!s) {
-        window._state.umapRange = null;
-        if (clearLink) clearLink.classList.add('inactive');
-      } else {
-        window._state.umapRange = [
-          [x.invert(s[0][0]), y.invert(s[1][1])],
-          [x.invert(s[1][0]), y.invert(s[0][1])],
-        ];
-        if (clearLink) clearLink.classList.remove('inactive');
-      }
-      window._applyFilter();
-      // Re-tint the UMAP dots to reflect the new selection.
-      drawUmap._repaint();
-    });
-  const brushG = svg.append('g').attr('class','brush').call(brush);
-  // Restore existing brush selection on redraw (e.g. after window resize).
-  if (ur) {
-    const px = [
-      [x(ur[0][0]), y(ur[1][1])],
-      [x(ur[1][0]), y(ur[0][1])],
-    ];
-    brushG.call(brush.move, px);
-  }
-
-  // Repaint-only helper (used by brush handler without rebuilding axes/brush).
-  drawUmap._repaint = () => {
-    const ur = window._state && window._state.umapRange;
-    ctx.clearRect(0,0,W,H);
-    for (const d of DATA) {
-      const b = bucketOf(d);
-      if (window._state.hiddenCats.has(b)) continue;
-      if (d.d < window._state.tRange[0] || d.d > window._state.tRange[1]) continue;
-      const inside = !ur || (d.ux >= ur[0][0] && d.ux <= ur[1][0] && d.uy >= ur[0][1] && d.uy <= ur[1][1]);
-      ctx.globalAlpha = inside ? 0.78 : 0.10;
-      ctx.fillStyle = BUCKET_COLOR[b];
-      ctx.beginPath();
-      ctx.arc(x(d.ux), y(d.uy), 1.2, 0, Math.PI*2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  };
-
-  if (clearLink && !clearLink._wired) {
-    clearLink._wired = true;
-    clearLink.addEventListener('click', () => {
-      brushG.call(brush.move, null);
-    });
-  }
+function setupYearLegend() {
+  // Re-purposed as a *density* legend: shows the cream→crimson ramp and
+  // labels the low/high ends so the colour choice reads as "more pixels
+  // changed in this hex" rather than "year X".
+  const el = document.getElementById('year-legend');
+  if (!el || el._built) return;
+  el._built = true;
+  const STEPS = 7;
+  const swatches = Array.from({length: STEPS}, (_, i) => {
+    const t = i / (STEPS - 1);
+    return `<span class="sw" style="background:${hexDensityColor(t)}; width:18px; height:8px;"></span>`;
+  }).join('');
+  el.style.flexDirection = 'column';
+  el.innerHTML = `
+    <div style="display:flex; gap:0; align-items:center;">${swatches}</div>
+    <div style="display:flex; justify-content:space-between; width:100%; font-size:9px; color:var(--muted, #8a7a60); margin-top:2px;">
+      <span>fewer pixels</span><span>more pixels</span>
+    </div>`;
 }
 
-function setupBeforeAfter() {
-  const wrap = document.getElementById('ba-wrap');
-  if (!wrap) return;
-  const handle = wrap.querySelector('.ba-handle');
-  const after = wrap.querySelector('.ba-after');
-  let x = 0.5;
-  function set(xp) {
-    x = Math.max(0, Math.min(1, xp));
-    // Overlay covers the LEFT ("before") half — dimmed so it reads as baseline.
-    // Dots still render only on the RIGHT ("after") half via window.__baSplitX.
-    if (after) after.style.clipPath = `polygon(0 0, ${x*100}% 0, ${x*100}% 100%, 0 100%)`;
-    if (handle) handle.style.left = (x*100) + '%';
-    window.__baSplitX = x;
-    if (window.TileView && window.TileView.isOpen()) window.TileView.refresh();
+function setupTileConsole() {
+  const root = document.getElementById('tile-console');
+  if (!root || root._wired) return;
+  root._wired = true;
+  // Pan/zoom amounts are intentionally generous — these buttons exist for
+  // users whose trackpad pinches produce tiny deltas; single-tap should
+  // feel like a meaningful shove, not a nudge.
+  const PAN_PX = 120;
+  const TILE_ZOOM_STEP = 0.8;
+  // Globe zoom nudges the spherical-distance above the Earth's surface by a
+  // multiplicative factor (same model as the wheel-zoom in globe.js).
+  const GLOBE_ZOOM_FACTOR = 0.78;     // <1 = zoom in, >1 = zoom out
+
+  function inTileView() { return window.TileView && window.TileView.isOpen(); }
+
+  function panGlobe(dx, dy) {
+    // Rotate camera orbit around target by mapping screen-pixel deltas to
+    // theta/phi nudges. Mirrors the drag-rotate logic in globe.js so the
+    // feel matches exactly.
+    if (!globe || !globe.controls) return;
+    const s = globe.controls.state;
+    const above = Math.max(0.001, s.dist - 1.0);
+    const sens = 0.005 * Math.min(1.0, above * 1.2);
+    s.theta -= dx * sens;
+    s.phi   -= dy * sens;
+    s.phi = Math.max(0.05, Math.min(Math.PI - 0.05, s.phi));
+    s.autoRotate = false;
+    globe.controls.apply();
   }
-  set(0.5);
-  let drag = false;
-  function ev(e) {
-    const r = wrap.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
-    set(cx / r.width);
+  function zoomGlobe(sign) {
+    if (!globe || !globe.controls) return;
+    const s = globe.controls.state;
+    const factor = sign > 0 ? GLOBE_ZOOM_FACTOR : 1 / GLOBE_ZOOM_FACTOR;
+    const above = Math.max(s.minDist - 1.0, s.dist - 1.0);
+    const newAbove = Math.max(s.minDist - 1.0, Math.min(s.maxDist - 1.0, above * factor));
+    s.dist = 1.0 + newAbove;
+    s.autoRotate = false;
+    globe.controls.apply();
   }
-  if (handle) handle.addEventListener('pointerdown', e => { drag = true; e.preventDefault(); });
-  window.addEventListener('pointermove', e => { if (drag) ev(e); });
-  window.addEventListener('pointerup', () => drag = false);
+
+  root.querySelectorAll('[data-dir]').forEach(b => {
+    b.addEventListener('click', () => {
+      const d = b.dataset.dir;
+      const [dx, dy] = d === 'up' ? [0,-PAN_PX] : d === 'down' ? [0,PAN_PX]
+                     : d === 'left' ? [-PAN_PX,0] : [PAN_PX,0];
+      if (inTileView()) window.TileView.pan(dx, dy);
+      else panGlobe(dx, dy);
+    });
+  });
+  root.querySelectorAll('[data-zoom]').forEach(b => {
+    b.addEventListener('click', () => {
+      const sign = parseFloat(b.dataset.zoom);      // +1 = in, -1 = out
+      if (inTileView()) window.TileView.zoomBy(sign * TILE_ZOOM_STEP);
+      else zoomGlobe(sign);
+    });
+  });
 }
 
 /* ═════════════ Tweaks ═════════════ */
@@ -1270,14 +1705,8 @@ function setupTweaks() {
   });
   ar.addEventListener('change', () => globe.setAutoRotate(ar.checked));
   ds.addEventListener('change', () => {
-    // Rebuild point sizes
-    const pts = DATA.map(d => ({
-      lon:d.x, lat:d.y, day:d.d, bucket: bucketOf(d),
-      color: BUCKET_COLOR[bucketOf(d)],
-      size: ds.value === 'uniform' ? 1.1 : recencySize(d),
-      d,
-    }));
-    globe.setPoints(pts);
+    DOT_SIZE_MODE = ds.value === 'uniform' ? 'uniform' : 'recency';
+    globe.setPoints(buildPoints());
     window._applyFilter();
   });
 
@@ -1308,26 +1737,17 @@ function openTileView() {
     zoom: 13.2,
     points: window._points,
     visible: window._passes,
-    onHover: (p, e) => {
-      if (!p) { tt.style.visibility = 'hidden'; return; }
-      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
-      tt.innerHTML = `
-        <div class="t-head">${labelFor(p.bucket)}</div>
-        <div class="t-meta">${d3.timeFormat('%Y · %b %d')(d0)}</div>
-        <div class="t-meta">${p.lat.toFixed(4)}°N &nbsp; ${p.lon.toFixed(4)}°E</div>
-      `;
-      tt.style.left = (e.clientX + 14) + 'px';
-      tt.style.top  = (e.clientY + 14) + 'px';
-      tt.style.visibility = 'visible';
-    },
+    // No hover tooltip in the tile view — hex density makes the tooltip
+    // flicker through every pixel move, which is more noise than signal.
+    // Click-to-inspect still works for specific hexes (see onClick).
+    onHover: null,
     onClick: (p, e) => {
       const ins = document.getElementById('inspector');
       if (!p) { ins.style.visibility = 'hidden'; return; }
-      const d0 = new Date(MANIFEST.t0_day); d0.setDate(d0.getDate() + Math.round(p.day));
-      document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>${labelFor(p.bucket)}`;
-      document.getElementById('ins-when').textContent = d3.timeFormat('%Y %b %d')(d0);
+      document.getElementById('ins-title').innerHTML = `<span class="swatch" style="background:${p.color}"></span>Borneo hex`;
+      document.getElementById('ins-when').textContent = `median change year ${p.y}`;
       document.getElementById('ins-where').textContent = `${p.lat.toFixed(4)}°N ${p.lon.toFixed(4)}°E`;
-      document.getElementById('ins-ndvi').textContent = p.d.n.toFixed(3);
+      document.getElementById('ins-ndvi').textContent = `${Math.round(p.n * 0.01).toLocaleString()} ha changed`;
       const cx = e ? e.clientX : window.innerWidth/2;
       const cy = e ? e.clientY : window.innerHeight/2;
       ins.style.left = Math.min(window.innerWidth - 310, cx + 16) + 'px';
@@ -1340,31 +1760,75 @@ function openTileView() {
   // Lazy-build the analysis panels the first time the tile view opens.
   if (!openTileView._built) {
     openTileView._built = true;
-    // Give layout a tick to settle so canvases measure correctly.
-    setTimeout(() => { try { drawUmap(); setupBeforeAfter(); } catch(e) { console.warn(e); } }, 120);
+    setupTileConsole();
+    setupBeforeAfter();
   }
+}
+
+// Before/after splitter on the tile canvas. We don't have a separate
+// "before" imagery layer yet, so the split just clips the detection-dot
+// overlay — LEFT of the handle shows raw Esri imagery, RIGHT shows the
+// same imagery with dots on top. Drag feel mirrors the timeline brush.
+function setupBeforeAfter() {
+  const wrap = document.getElementById('ba-wrap');
+  if (!wrap) return;
+  const handle = wrap.querySelector('.ba-handle');
+  const after = wrap.querySelector('.ba-after');
+  function set(xp) {
+    const x = Math.max(0, Math.min(1, xp));
+    if (after) after.style.clipPath = `polygon(0 0, ${x*100}% 0, ${x*100}% 100%, 0 100%)`;
+    if (handle) handle.style.left = (x*100) + '%';
+    window.__baSplitX = x;
+    if (window.TileView && window.TileView.isOpen()) window.TileView.refresh();
+    // Slider drags should track the histogram live. The regular draw()
+    // path debounces viewport-hist updates by 500 ms, which feels laggy
+    // under a drag; call the no-debounce path directly.
+    if (window._refreshViewportHistNow) window._refreshViewportHistNow();
+  }
+  set(0.5);
+  let dragging = false;
+  function onMove(e) {
+    if (!dragging) return;
+    const r = wrap.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    set(cx / r.width);
+  }
+  if (handle) handle.addEventListener('pointerdown', e => { dragging = true; e.preventDefault(); });
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', () => dragging = false);
 }
 function closeTileView() {
   window.TileView.close();
   document.body.classList.remove('in-tile-view');
   document.getElementById('tooltip').style.visibility = 'hidden';
+  // Histogram reverts to the global dataset so it doesn't sit showing
+  // whatever viewport snapshot the tile view last pushed.
+  if (window._refreshViewportHist) window._refreshViewportHist(null);
 }
 
-/* ═════════════ Zoom indicator ═════════════ */
+/* ═════════════ Globe → tile-view zoom bridge ═════════════ */
+// The per-pixel HDBSCAN-labelled layer lives in the tile view, so we auto-
+// cross in when the globe's camera distance drops below a threshold. That
+// way a user who zoom-pinches into Sarawak sees the dots without having to
+// find the "Fly in" button. Also drives the big title's fade-in on
+// zoom-out.
 function setupZoomIndicator() {
-  const fill = document.getElementById('zoom-fill');
-  const lbl = document.getElementById('zoom-label');
+  const title = document.querySelector('.hud-title');
+  if (title) title.style.transition = 'opacity 0.5s ease';
+  const AUTO_TILE_DIST = 1.25;    // ≈ Sarawak zoomed to a few 100 km view
   setInterval(() => {
     const d = globe.getDist();
-    // d range 1.12 (close) → 5.5 (far)
-    const t = 1 - (d - 1.12) / (5.5 - 1.12);
-    fill.style.width = Math.max(3, t * 100) + '%';
-    if (d < 1.18) lbl.textContent = 'pixel-level';
-    else if (d < 1.4) lbl.textContent = 'pilot tile';
-    else if (d < 1.9) lbl.textContent = 'Baram interior';
-    else if (d < 2.8) lbl.textContent = 'Sarawak';
-    else if (d < 3.6) lbl.textContent = 'Borneo';
-    else lbl.textContent = 'space';
+    if (title && !document.body.classList.contains('in-tile-view')) {
+      title.style.opacity = d >= 2.8 ? '1' : '0';
+      title.style.pointerEvents = d >= 2.8 ? 'auto' : 'none';
+    }
+    // Cross into tile-view once the user has zoomed in far enough for
+    // per-pixel dots to be readable. Only fires if we're currently on the
+    // globe — doesn't re-trigger while already in tile view.
+    if (d < AUTO_TILE_DIST && !document.body.classList.contains('in-tile-view')) {
+      globe.setAutoRotate(false);
+      openTileView();
+    }
   }, 200);
 }
 </script>

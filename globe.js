@@ -39,42 +39,31 @@
       // past that point the app swaps to a dedicated 2D tile view.
       minDist: opts.minDist ?? 1.05,
       maxDist: opts.maxDist ?? 6.0,
-      autoRotate: true,
+      autoRotate: false,            // static until the user triggers flyTo.
+                                    // Decorative spinning was getting mistaken
+                                    // for an in-progress response to clicks.
       autoSpeed: 0.04,              // rad/sec
     };
+    let onChangeCB = null;
     function apply() {
       const x = state.dist * Math.sin(state.phi) * Math.sin(state.theta);
       const y = state.dist * Math.cos(state.phi);
       const z = state.dist * Math.sin(state.phi) * Math.cos(state.theta);
       camera.position.set(x, y, z);
       camera.lookAt(0, 0, 0);
+      if (onChangeCB) onChangeCB();
     }
     apply();
 
-    let dragging = false, lastX = 0, lastY = 0;
-    dom.addEventListener('pointerdown', e => {
-      dragging = true; lastX = e.clientX; lastY = e.clientY;
-      state.autoRotate = false;
-      dom.setPointerCapture(e.pointerId);
-      dom.style.cursor = 'grabbing';
-    });
-    dom.addEventListener('pointerup', e => {
-      dragging = false; dom.releasePointerCapture(e.pointerId);
-      dom.style.cursor = 'grab';
-    });
-    dom.addEventListener('pointermove', e => {
-      if (!dragging) return;
-      const dx = e.clientX - lastX, dy = e.clientY - lastY;
-      lastX = e.clientX; lastY = e.clientY;
-      // Rotation sensitivity scales with distance-above-surface so it stays
-      // smooth both from space AND when hovering right above the pilot tile.
-      const above = Math.max(0.001, state.dist - 1.0);
-      const sens = 0.005 * Math.min(1.0, above * 1.2);
-      state.theta -= dx * sens;
-      state.phi   -= dy * sens;
-      state.phi = Math.max(0.05, Math.min(Math.PI - 0.05, state.phi));
-      apply();
-    });
+    // Drag-to-rotate is intentionally disabled on the main globe view —
+    // the UX was ambiguous (click vs drag vs pointer-capture stealing
+    // focus from HUD buttons). Any left-click on the globe is now the
+    // "fly in" gesture instead; users reach the tile view either by
+    // clicking the globe (handler wired in index.html), clicking the
+    // Fly button, or wheel-zooming close enough to trigger the auto
+    // tile-view threshold. Auto-rotate still animates idly so the globe
+    // doesn't look static.
+    dom.style.cursor = 'pointer';
     dom.addEventListener('wheel', e => {
       e.preventDefault();
       const scale = Math.exp(e.deltaY * 0.0015);
@@ -125,6 +114,7 @@
     }
     return {
       tick, apply, flyTo, state,
+      set onChange(cb) { onChangeCB = cb; },
       setAutoRotate(on) { state.autoRotate = on; },
       getDist() { return state.dist; },
     };
@@ -348,7 +338,7 @@
         depthWrite: false,
         uniforms: {
           uCamPos:   { value: new THREE.Vector3() },
-          uSizeBase: { value: 4.0 },
+          uSizeBase: { value: 2.4 },
           uPxRatio:  { value: Math.min(devicePixelRatio, 2) },
         },
         vertexShader: `
@@ -417,11 +407,16 @@
         const _v = { x:0, y:0, z:0 };
         for (let i=0;i<n;i++) {
           const p = _pointsData[i];
+          // Match llToVec's coord convention (theta = lon + π) so the dots
+          // land on the same spot on the earth texture as flyTo(lon,lat)
+          // aims the camera at. The old version had the opposite z sign,
+          // placing dots 180° east of their true longitude — Borneo (114°E)
+          // rendered at 114°W, mid-Pacific.
           const lon = p.lon * Math.PI/180, lat = p.lat * Math.PI/180;
           const cl = Math.cos(lat);
-          pos[i*3]   = POINT_R * cl * Math.cos(lon);
-          pos[i*3+1] = POINT_R * Math.sin(lat);
-          pos[i*3+2] = POINT_R * cl * Math.sin(lon);
+          pos[i*3]   =  POINT_R * cl * Math.cos(lon);
+          pos[i*3+1] =  POINT_R * Math.sin(lat);
+          pos[i*3+2] = -POINT_R * cl * Math.sin(lon);
           const rgb = hexToRgb(p.color);
           col[i*3]=rgb[0]; col[i*3+1]=rgb[1]; col[i*3+2]=rgb[2];
           size[i] = p.size ?? 1.0;
@@ -437,16 +432,23 @@
         scene.add(pointsMesh);
       }
 
-      function setPoints(arr) { _pointsData = arr; rebuildPoints(); }
+      function setPoints(arr) {
+        _pointsData = arr; rebuildPoints();
+        if (renderer._markDirty) renderer._markDirty(3);
+      }
       function setVisibility(fn) {
         _visibleFn = fn;
         if (!pointsMesh) return;
         const v = pointsMesh.geometry.attributes.aVisible;
         for (let i=0;i<_pointsData.length;i++) v.array[i] = fn(_pointsData[i]) ? 1 : 0;
         v.needsUpdate = true;
+        if (renderer._markDirty) renderer._markDirty(3);
       }
       function setPointSize(scale) {
-        pointsMat.uniforms.uSizeBase.value = 1.8 * scale;
+        // Base multiplier was 1.8 — too big for the state-wide hex layer
+        // where 28k points cover a large area. 1.0 reads as "individual
+        // hexes" without swallowing the surrounding geography.
+        pointsMat.uniforms.uSizeBase.value = 1.0 * scale;
       }
 
       // Pilot bounding-box outline on sphere (a small orange square marker)
@@ -471,18 +473,36 @@
         initialDist: 3.2, minDist: 1.05, maxDist: 5.5,
       });
 
-      // Render loop. Keeps running so flyTo and auto-rotate smoothly animate;
-      // the cost is low (one draw call on a 128x128 sphere + a buffer of ~47k
-      // points), and allocation-free after setup.
+      // Render loop — dirty-flag driven so we're not re-rendering 60× / sec
+      // when nothing's changing. The loop itself keeps running (cheap — the
+      // callback just checks the dirty flag) but the actual render() call
+      // only fires on:
+      //   (a) autoRotate ticking the camera
+      //   (b) user input (drag / wheel / flyTo / setVisibility)
+      //   (c) a few frames after any camera change so the anti-aliasing
+      //       post-settle is captured
+      // This reclaims ~90 % of the prior render budget, which was previously
+      // competing with the timeline-brush DOM work during drag.
       let last = performance.now();
+      let dirty = true, settleFrames = 0;
+      function markDirty(n = 2) { dirty = true; settleFrames = Math.max(settleFrames, n); }
+      controls.onChange = () => markDirty(4);
       function frame(now) {
         const dt = (now - last) / 1000; last = now;
-        controls.tick(dt);
-        pointsMat.uniforms.uCamPos.value.copy(camera.position);
-        renderer.render(scene, camera);
+        const moved = controls.tick(dt);
+        if (moved) markDirty(2);
+        if (dirty || settleFrames > 0) {
+          pointsMat.uniforms.uCamPos.value.copy(camera.position);
+          renderer.render(scene, camera);
+          if (!moved) settleFrames = Math.max(0, settleFrames - 1);
+          dirty = false;
+        }
         requestAnimationFrame(frame);
       }
       requestAnimationFrame(frame);
+      // Expose so other modules (points rebuilds, visibility updates) can
+      // nudge the loop awake.
+      renderer._markDirty = markDirty;
 
       // Resize
       function resize() {
