@@ -265,14 +265,17 @@ const FLOW_VS = `
     vec3 pos = mix(aPre, aPost, t);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     bool isHead = aTail < 0.5;
-    gl_PointSize = isHead ? 10.0 : max(3.0, 9.0 - aTail);
+    gl_PointSize = isHead ? 14.0 : max(3.0, 11.0 - aTail);
     vColor = aColor;
     vIsHead = isHead ? 1.0 : 0.0;
     // Head visible always (low alpha at-rest, full alpha in-flight).
     // Tail visible only during flight, fading by tail position.
     float flying = step(0.0001, t) * step(t, 0.9999);
+    // Head always fully visible (so the cluster structure reads even
+    // when no particle is mid-flight). Tail samples fade from head and
+    // appear only during flight.
     if (isHead) {
-      vAlpha = mix(0.45, 1.0, flying);
+      vAlpha = 1.0;
     } else {
       vAlpha = flying * (1.0 - aTail / 7.0);
     }
@@ -338,9 +341,10 @@ function buildFlow() {
     fragmentShader: FLOW_FS,
     transparent: true,
     depthWrite: false,
-    blending: THREE.NormalBlending,    // crisp dots, not glow
+    blending: THREE.AdditiveBlending,
   });
   flowPoints = new THREE.Points(geom, mat);
+  flowPoints.renderOrder = 2;          // above the density cloud
   scene.add(flowPoints);
   console.log(`[pca_flow] built ${N} pixels × ${TAIL_LEN+1} samples = ${M} vertices, range PC1 [`,
     Math.min(...rows.map(r => Math.min(r.pre[0], r.post[0]))).toFixed(2), ',',
@@ -383,6 +387,7 @@ function buildCloud() {
     sizeAttenuation: true,
   });
   cloudPoints = new THREE.Points(geom, mat);
+  cloudPoints.renderOrder = 0;
   scene.add(cloudPoints);
 }
 
