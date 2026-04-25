@@ -241,66 +241,95 @@ function makeTextSprite(text, color) {
 // the pixel's detection year.  uPhase cycles 0→1 over CYCLE_SEC,
 // each particle's release time is yearNorm * (1 − TRAVEL_FRAC) so
 // the wave of pixels sweeps PC space in detection-year order.
+// Flow particles: each pixel renders as a moving disc with a fading
+// streak behind it.  The streak is drawn as N tail samples of the
+// vertex's recent positions, with linearly fading alpha.  Constant
+// brightness during flight (no pulse) so motion reads cleanly.
 const FLOW_VS = `
   attribute vec3 aPre;
   attribute vec3 aPost;
-  attribute float aRelease;     // release time in [0, 1 - TRAVEL_FRAC]
+  attribute float aRelease;
   attribute vec3 aColor;
+  attribute float aTail;        // 0 = head, 1..N = trail samples
   uniform float uPhase;
   uniform float uTravelFrac;
+  uniform float uTailStep;      // phase offset per tail sample
   varying vec3 vColor;
-  varying float vT;
+  varying float vAlpha;
+  varying float vIsHead;
   void main() {
-    float t = clamp((uPhase - aRelease) / uTravelFrac, 0.0, 1.0);
+    // Each particle's t at this tail position.
+    float pTail = uPhase - aTail * uTailStep;
+    float t = clamp((pTail - aRelease) / uTravelFrac, 0.0, 1.0);
     vec3 pos = mix(aPre, aPost, t);
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = 7.0 * (180.0 / -mv.z);
+    // Head is biggest, tail samples shrink.
+    float sz = (aTail < 0.5) ? 9.0 : (7.5 - aTail * 1.0);
+    gl_PointSize = sz * (180.0 / -mv.z);
     vColor = aColor;
-    vT = t;
+    // Alpha: head = 1.0, trail fades, off when not in flight or pre-release
+    bool flying = (t > 0.0) && (t < 1.0);
+    float fade = 1.0 - aTail / 6.0;          // longest tail half-faded
+    vAlpha = flying ? fade : (aTail < 0.5 ? 0.18 : 0.0);
+    vIsHead = (aTail < 0.5) ? 1.0 : 0.0;
   }`;
 const FLOW_FS = `
   varying vec3 vColor;
-  varying float vT;
+  varying float vAlpha;
+  varying float vIsHead;
   void main() {
     vec2 c = gl_PointCoord - 0.5;
     float d = length(c);
     if (d > 0.5) discard;
-    // Pulse: brighter mid-flight, dimmer at endpoints, so the
-    // moving wave reads strongly while at-rest particles fade back
-    float pulse = 0.35 + 0.65 * smoothstep(0.0, 0.15, vT) * (1.0 - smoothstep(0.85, 1.0, vT));
-    float a = pulse * (1.0 - d * 1.6);
+    // Crisp head with soft halo; tail samples are smoother dots.
+    float core = (vIsHead > 0.5) ? smoothstep(0.5, 0.15, d) : (1.0 - 2.0 * d);
+    float a = vAlpha * core;
     gl_FragColor = vec4(vColor, a);
   }`;
 
+// Each pixel is replicated TAIL+1 times (head + TAIL trail samples)
+// so the vertex shader can render the streak without per-frame CPU
+// updates.  TAIL_LEN trail samples per pixel.
+const TAIL_LEN = 6;
 function buildFlow() {
   if (flowPoints) { scene.remove(flowPoints); flowPoints.geometry.dispose(); flowPoints.material.dispose(); flowPoints = null; }
   if (!raw) return;
   const rows = raw.rows.filter(r => !hiddenGrps.has(r.grp));
   const N = rows.length;
   if (!N) return;
-  const aPre = new Float32Array(N*3);
-  const aPost = new Float32Array(N*3);
-  const aRelease = new Float32Array(N);
-  const aColor = new Float32Array(N*3);
+  const M = N * (TAIL_LEN + 1);
+  const aPre = new Float32Array(M*3);
+  const aPost = new Float32Array(M*3);
+  const aRelease = new Float32Array(M);
+  const aColor = new Float32Array(M*3);
+  const aTail = new Float32Array(M);
   const yrNorm = (y) => (y - YR_MIN) / Math.max(1, YR_MAX - YR_MIN);
+  let off = 0;
   for (let i = 0; i < N; i++) {
     const r = rows[i];
-    aPre[i*3+0]  = r.pre[0];  aPre[i*3+1]  = r.pre[1];  aPre[i*3+2]  = r.pre[2];
-    aPost[i*3+0] = r.post[0]; aPost[i*3+1] = r.post[1]; aPost[i*3+2] = r.post[2];
-    aRelease[i]  = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
+    const rel = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
     const [cr, cg, cb] = GRP_COL[r.grp] || [0.7, 0.7, 0.7];
-    aColor[i*3+0] = cr; aColor[i*3+1] = cg; aColor[i*3+2] = cb;
+    for (let k = 0; k <= TAIL_LEN; k++) {
+      aPre[off*3+0]  = r.pre[0];  aPre[off*3+1]  = r.pre[1];  aPre[off*3+2]  = r.pre[2];
+      aPost[off*3+0] = r.post[0]; aPost[off*3+1] = r.post[1]; aPost[off*3+2] = r.post[2];
+      aRelease[off]  = rel;
+      aColor[off*3+0] = cr; aColor[off*3+1] = cg; aColor[off*3+2] = cb;
+      aTail[off]     = k;
+      off++;
+    }
   }
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('aPre',     new THREE.BufferAttribute(aPre, 3));
   geom.setAttribute('aPost',    new THREE.BufferAttribute(aPost, 3));
   geom.setAttribute('aRelease', new THREE.BufferAttribute(aRelease, 1));
   geom.setAttribute('aColor',   new THREE.BufferAttribute(aColor, 3));
+  geom.setAttribute('aTail',    new THREE.BufferAttribute(aTail, 1));
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      uPhase: { value: 0 },
+      uPhase:      { value: 0 },
       uTravelFrac: { value: TRAVEL_FRAC },
+      uTailStep:   { value: TRAVEL_FRAC / 14.0 },   // each tail sample = 1/14th of a travel duration behind
     },
     vertexShader: FLOW_VS,
     fragmentShader: FLOW_FS,
