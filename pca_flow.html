@@ -242,10 +242,12 @@ function makeTextSprite(text, color) {
 // each particle's release time is yearNorm * (1 − TRAVEL_FRAC) so
 // the wave of pixels sweeps PC space in detection-year order.
 // Flow particles: each pixel renders as a moving disc with a fading
-// streak behind it.  The streak is drawn as N tail samples of the
-// vertex's recent positions, with linearly fading alpha.  Constant
-// brightness during flight (no pulse) so motion reads cleanly.
+// streak behind it.  The streak is drawn as TAIL+1 vertices per pixel
+// (head + N tail samples).  At-rest particles are visible at low alpha
+// so the user sees the pre/post structure even when no flight is
+// happening; in-flight particles are bright; tail fades behind.
 const FLOW_VS = `
+  precision highp float;
   attribute vec3 aPre;
   attribute vec3 aPost;
   attribute float aRelease;
@@ -253,29 +255,30 @@ const FLOW_VS = `
   attribute float aTail;        // 0 = head, 1..N = trail samples
   uniform float uPhase;
   uniform float uTravelFrac;
-  uniform float uTailStep;      // phase offset per tail sample
+  uniform float uTailStep;
   varying vec3 vColor;
   varying float vAlpha;
   varying float vIsHead;
   void main() {
-    // Each particle's t at this tail position.
     float pTail = uPhase - aTail * uTailStep;
     float t = clamp((pTail - aRelease) / uTravelFrac, 0.0, 1.0);
     vec3 pos = mix(aPre, aPost, t);
-    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-    gl_Position = projectionMatrix * mv;
-    // Head ~9 px, tail samples shrink to ~3 px. Fixed-pixel size so
-    // particles read as moving DOTS not glowing blobs (no depth
-    // attenuation — tiny per-pixel dots crisp against the soft cloud).
-    gl_PointSize = (aTail < 0.5) ? 9.0 : max(3.0, 8.0 - aTail);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    bool isHead = aTail < 0.5;
+    gl_PointSize = isHead ? 10.0 : max(3.0, 9.0 - aTail);
     vColor = aColor;
-    // Alpha: head = 1.0, trail fades, off when not in flight or pre-release
-    bool flying = (t > 0.0) && (t < 1.0);
-    float fade = 1.0 - aTail / 6.0;          // longest tail half-faded
-    vAlpha = flying ? fade : (aTail < 0.5 ? 0.18 : 0.0);
-    vIsHead = (aTail < 0.5) ? 1.0 : 0.0;
+    vIsHead = isHead ? 1.0 : 0.0;
+    // Head visible always (low alpha at-rest, full alpha in-flight).
+    // Tail visible only during flight, fading by tail position.
+    float flying = step(0.0001, t) * step(t, 0.9999);
+    if (isHead) {
+      vAlpha = mix(0.45, 1.0, flying);
+    } else {
+      vAlpha = flying * (1.0 - aTail / 7.0);
+    }
   }`;
 const FLOW_FS = `
+  precision highp float;
   varying vec3 vColor;
   varying float vAlpha;
   varying float vIsHead;
@@ -283,10 +286,9 @@ const FLOW_FS = `
     vec2 c = gl_PointCoord - 0.5;
     float d = length(c);
     if (d > 0.5) discard;
-    // Crisp head with soft halo; tail samples are smoother dots.
-    float core = (vIsHead > 0.5) ? smoothstep(0.5, 0.15, d) : (1.0 - 2.0 * d);
-    float a = vAlpha * core;
-    gl_FragColor = vec4(vColor, a);
+    // Head: solid centre with feathered edge. Tail: soft dot.
+    float core = vIsHead > 0.5 ? smoothstep(0.5, 0.10, d) : (1.0 - 2.0 * d);
+    gl_FragColor = vec4(vColor, vAlpha * core);
   }`;
 
 // Each pixel is replicated TAIL+1 times (head + TAIL trail samples)
@@ -340,6 +342,9 @@ function buildFlow() {
   });
   flowPoints = new THREE.Points(geom, mat);
   scene.add(flowPoints);
+  console.log(`[pca_flow] built ${N} pixels × ${TAIL_LEN+1} samples = ${M} vertices, range PC1 [`,
+    Math.min(...rows.map(r => Math.min(r.pre[0], r.post[0]))).toFixed(2), ',',
+    Math.max(...rows.map(r => Math.max(r.pre[0], r.post[0]))).toFixed(2), ']');
 }
 
 // ── Density cloud (combined pre + post) ───────────────────────────
