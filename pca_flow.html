@@ -241,140 +241,67 @@ function makeTextSprite(text, color) {
 // the pixel's detection year.  uPhase cycles 0→1 over CYCLE_SEC,
 // each particle's release time is yearNorm * (1 − TRAVEL_FRAC) so
 // the wave of pixels sweeps PC space in detection-year order.
-// Flow particles: each pixel renders as a moving disc with a fading
-// streak behind it.  The streak is drawn as TAIL+1 vertices per pixel
-// (head + N tail samples).  At-rest particles are visible at low alpha
-// so the user sees the pre/post structure even when no flight is
-// happening; in-flight particles are bright; tail fades behind.
-const FLOW_VS = `
-  precision highp float;
-  attribute vec3 aPre;
-  attribute vec3 aPost;
-  attribute float aRelease;
-  attribute vec3 aColor;
-  attribute float aTail;        // 0 = head, 1..N = trail samples
-  uniform float uPhase;
-  uniform float uTravelFrac;
-  uniform float uTailStep;
-  varying vec3 vColor;
-  varying float vAlpha;
-  varying float vIsHead;
-  void main() {
-    float pTail = uPhase - aTail * uTailStep;
-    float t = clamp((pTail - aRelease) / uTravelFrac, 0.0, 1.0);
-    vec3 pos = mix(aPre, aPost, t);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-    bool isHead = aTail < 0.5;
-    gl_PointSize = isHead ? 14.0 : max(3.0, 11.0 - aTail);
-    vColor = aColor;
-    vIsHead = isHead ? 1.0 : 0.0;
-    // Head visible always (low alpha at-rest, full alpha in-flight).
-    // Tail visible only during flight, fading by tail position.
-    float flying = step(0.0001, t) * step(t, 0.9999);
-    // Head always fully visible (so the cluster structure reads even
-    // when no particle is mid-flight). Tail samples fade from head and
-    // appear only during flight.
-    if (isHead) {
-      vAlpha = 1.0;
-    } else {
-      vAlpha = flying * (1.0 - aTail / 7.0);
-    }
-  }`;
-const FLOW_FS = `
-  precision highp float;
-  varying vec3 vColor;
-  varying float vAlpha;
-  varying float vIsHead;
-  void main() {
-    vec2 c = gl_PointCoord - 0.5;
-    float d = length(c);
-    if (d > 0.5) discard;
-    // Head: solid centre with feathered edge. Tail: soft dot.
-    float core = vIsHead > 0.5 ? smoothstep(0.5, 0.10, d) : (1.0 - 2.0 * d);
-    gl_FragColor = vec4(vColor, vAlpha * core);
-  }`;
-
-// Each pixel is replicated TAIL+1 times (head + TAIL trail samples)
-// so the vertex shader can render the streak without per-frame CPU
-// updates.  TAIL_LEN trail samples per pixel.
-const TAIL_LEN = 6;
+// Flow particles — single PointsMaterial (no custom shader).  Vertex
+// positions are updated per frame in JS based on each pixel's release
+// time and the current animation phase.  Reliable across all WebGL
+// drivers; the shader-based version was rendering blank on some setups.
+const flowState = { rows: null, releases: null, dirty: false };
 function buildFlow() {
-  if (flowPoints) { scene.remove(flowPoints); flowPoints.geometry.dispose(); flowPoints.material.dispose(); flowPoints = null; }
+  if (flowPoints) {
+    scene.remove(flowPoints); flowPoints.geometry.dispose(); flowPoints.material.dispose(); flowPoints = null;
+  }
   if (!raw) return;
   const rows = raw.rows.filter(r => !hiddenGrps.has(r.grp));
   const N = rows.length;
   if (!N) return;
-  const M = N * (TAIL_LEN + 1);
-  const aPre = new Float32Array(M*3);
-  const aPost = new Float32Array(M*3);
-  const aRelease = new Float32Array(M);
-  const aColor = new Float32Array(M*3);
-  const aTail = new Float32Array(M);
+  const positions = new Float32Array(N*3);
+  const colors    = new Float32Array(N*3);
+  const releases  = new Float32Array(N);
   const yrNorm = (y) => (y - YR_MIN) / Math.max(1, YR_MAX - YR_MIN);
-  let off = 0;
   for (let i = 0; i < N; i++) {
     const r = rows[i];
-    const rel = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
+    positions[i*3+0] = r.pre[0]; positions[i*3+1] = r.pre[1]; positions[i*3+2] = r.pre[2];
     const [cr, cg, cb] = GRP_COL[r.grp] || [0.7, 0.7, 0.7];
-    for (let k = 0; k <= TAIL_LEN; k++) {
-      aPre[off*3+0]  = r.pre[0];  aPre[off*3+1]  = r.pre[1];  aPre[off*3+2]  = r.pre[2];
-      aPost[off*3+0] = r.post[0]; aPost[off*3+1] = r.post[1]; aPost[off*3+2] = r.post[2];
-      aRelease[off]  = rel;
-      aColor[off*3+0] = cr; aColor[off*3+1] = cg; aColor[off*3+2] = cb;
-      aTail[off]     = k;
-      off++;
-    }
+    colors[i*3+0] = cr; colors[i*3+1] = cg; colors[i*3+2] = cb;
+    releases[i] = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
   }
   const geom = new THREE.BufferGeometry();
-  geom.setAttribute('aPre',     new THREE.BufferAttribute(aPre, 3));
-  geom.setAttribute('aPost',    new THREE.BufferAttribute(aPost, 3));
-  geom.setAttribute('aRelease', new THREE.BufferAttribute(aRelease, 1));
-  geom.setAttribute('aColor',   new THREE.BufferAttribute(aColor, 3));
-  geom.setAttribute('aTail',    new THREE.BufferAttribute(aTail, 1));
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uPhase:      { value: 0 },
-      uTravelFrac: { value: TRAVEL_FRAC },
-      uTailStep:   { value: TRAVEL_FRAC / 14.0 },
-    },
-    vertexShader: FLOW_VS,
-    fragmentShader: FLOW_FS,
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+  const mat = new THREE.PointsMaterial({
+    vertexColors: true,
+    size: 0.16,
+    sizeAttenuation: true,
     transparent: true,
+    opacity: 0.95,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   flowPoints = new THREE.Points(geom, mat);
-  flowPoints.renderOrder = 2;          // above the density cloud
+  flowPoints.renderOrder = 2;
   scene.add(flowPoints);
+  flowState.rows     = rows;
+  flowState.releases = releases;
+  flowState.dirty    = true;
+  console.log(`[pca_flow] built ${N} pixels (PointsMaterial, JS-side animation)`);
+}
 
-  // ── Diagnostic: a parallel static Points cloud using PointsMaterial
-  // (no shader, no animation).  If the shader-based flowPoints isn't
-  // visible but THIS one is, the problem is in the shader; if neither
-  // is visible the problem is elsewhere (geometry, camera, depth).
-  // Renders only the HEAD positions at pre, in the same colours.
-  const debugPos = new Float32Array(N*3);
-  const debugCol = new Float32Array(N*3);
-  for (let i = 0; i < N; i++) {
+// Per-frame position update — pure JS, ~5k float writes per frame.
+function updateFlowPositions(p) {
+  if (!flowPoints || !flowState.rows) return;
+  const rows = flowState.rows;
+  const releases = flowState.releases;
+  const arr = flowPoints.geometry.attributes.position.array;
+  const tf = TRAVEL_FRAC;
+  for (let i = 0; i < rows.length; i++) {
+    let t = (p - releases[i]) / tf;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
     const r = rows[i];
-    debugPos[i*3+0] = r.pre[0]; debugPos[i*3+1] = r.pre[1]; debugPos[i*3+2] = r.pre[2];
-    const [cr, cg, cb] = GRP_COL[r.grp] || [1, 1, 1];
-    debugCol[i*3+0] = cr; debugCol[i*3+1] = cg; debugCol[i*3+2] = cb;
+    arr[i*3+0] = r.pre[0] + t * (r.post[0] - r.pre[0]);
+    arr[i*3+1] = r.pre[1] + t * (r.post[1] - r.pre[1]);
+    arr[i*3+2] = r.pre[2] + t * (r.post[2] - r.pre[2]);
   }
-  const dgeom = new THREE.BufferGeometry();
-  dgeom.setAttribute('position', new THREE.Float32BufferAttribute(debugPos, 3));
-  dgeom.setAttribute('color',    new THREE.Float32BufferAttribute(debugCol, 3));
-  const dmat = new THREE.PointsMaterial({
-    vertexColors: true, size: 0.10, sizeAttenuation: true,
-    transparent: false, depthWrite: true,
-  });
-  const dpts = new THREE.Points(dgeom, dmat);
-  dpts.renderOrder = 3;
-  scene.add(dpts);
-
-  console.log(`[pca_flow] built ${N} pixels × ${TAIL_LEN+1} samples = ${M} vertices, range PC1 [`,
-    Math.min(...rows.map(r => Math.min(r.pre[0], r.post[0]))).toFixed(2), ',',
-    Math.max(...rows.map(r => Math.max(r.pre[0], r.post[0]))).toFixed(2),
-    '] (debug PointsMaterial cloud added at renderOrder 3)');
+  flowPoints.geometry.attributes.position.needsUpdate = true;
 }
 
 // ── Density cloud (combined pre + post) ───────────────────────────
@@ -431,7 +358,7 @@ function updatePhase() {
 function animate() {
   requestAnimationFrame(animate);
   updatePhase();
-  if (flowPoints) flowPoints.material.uniforms.uPhase.value = phase;
+  updateFlowPositions(phase);
   // Reflect phase as a "year"-style readout for the user
   // (year roughly equals YR_MIN + phase * (YR_MAX - YR_MIN), since
   // particles release in year order).
