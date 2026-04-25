@@ -264,9 +264,10 @@ const FLOW_VS = `
     vec3 pos = mix(aPre, aPost, t);
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
-    // Head is biggest, tail samples shrink.
-    float sz = (aTail < 0.5) ? 9.0 : (7.5 - aTail * 1.0);
-    gl_PointSize = sz * (180.0 / -mv.z);
+    // Head ~9 px, tail samples shrink to ~3 px. Fixed-pixel size so
+    // particles read as moving DOTS not glowing blobs (no depth
+    // attenuation — tiny per-pixel dots crisp against the soft cloud).
+    gl_PointSize = (aTail < 0.5) ? 9.0 : max(3.0, 8.0 - aTail);
     vColor = aColor;
     // Alpha: head = 1.0, trail fades, off when not in flight or pre-release
     bool flying = (t > 0.0) && (t < 1.0);
@@ -329,13 +330,13 @@ function buildFlow() {
     uniforms: {
       uPhase:      { value: 0 },
       uTravelFrac: { value: TRAVEL_FRAC },
-      uTailStep:   { value: TRAVEL_FRAC / 14.0 },   // each tail sample = 1/14th of a travel duration behind
+      uTailStep:   { value: TRAVEL_FRAC / 14.0 },
     },
     vertexShader: FLOW_VS,
     fragmentShader: FLOW_FS,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,    // crisp dots, not glow
   });
   flowPoints = new THREE.Points(geom, mat);
   scene.add(flowPoints);
@@ -368,10 +369,10 @@ function buildCloud() {
   geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   // Big soft halo. PointsMaterial with additive gives summed-density visual.
   const mat = new THREE.PointsMaterial({
-    color: 0xc7b48a,
-    size: 0.42,
+    color: 0x847a60,
+    size: 0.18,
     transparent: true,
-    opacity: 0.07,
+    opacity: 0.04,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true,
