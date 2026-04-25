@@ -7,8 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,500;1,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 <style>
   :root { --paper:#f4ede1; --rule:rgba(244,237,225,0.10); --muted:rgba(244,237,225,0.55); --ochre:#e7c798; }
   * { box-sizing: border-box; }
@@ -117,7 +123,10 @@
   </div>
 </div>
 
-<script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
 const RAW_URL = 'data/pca_flow_sample.json';
 let raw = null, scene, camera, renderer, controls;
 let lineMesh, preMesh, postMesh;
@@ -155,7 +164,7 @@ function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('scene').appendChild(renderer.domElement);
 
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
   controls.target.set(-2, 0.5, 1);
 
