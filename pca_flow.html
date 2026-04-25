@@ -21,11 +21,7 @@
   html, body { margin: 0; padding: 0; height: 100%; background: #0a0806; color: var(--paper);
                font-family: 'Inter', sans-serif; overflow: hidden; }
   #scene { position: fixed; inset: 0; }
-  /* ── Title plate (top-left) ──────────────────────────────── */
-  #title {
-    position: fixed; top: 24px; left: 28px; max-width: 380px; z-index: 10;
-    pointer-events: none;
-  }
+  #title { position: fixed; top: 24px; left: 28px; max-width: 380px; z-index: 10; pointer-events: none; }
   #title .eyebrow {
     font-family: 'JetBrains Mono', monospace; font-size: 10px;
     letter-spacing: 0.22em; text-transform: uppercase; color: var(--ochre);
@@ -40,7 +36,6 @@
     font-family: 'Inter', sans-serif; font-size: 12.5px; line-height: 1.55;
     color: #cfbe98; margin: 0;
   }
-  /* ── Right rail (controls + legend) ──────────────────────── */
   #rail {
     position: fixed; top: 24px; right: 24px; z-index: 10;
     width: 220px; padding: 12px 14px;
@@ -49,8 +44,7 @@
     font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98;
   }
   #rail h3 { margin: 0 0 8px; font-family: 'Fraunces', serif;
-             font-style: italic; font-size: 14px; color: var(--paper);
-             font-weight: 400; }
+             font-style: italic; font-size: 14px; color: var(--paper); font-weight: 400; }
   #rail .row { display: flex; justify-content: space-between; align-items: center;
                padding: 4px 0; border-top: 1px dashed var(--rule); }
   #rail .row:first-of-type { border-top: 0; }
@@ -60,7 +54,6 @@
   #rail .toggle-row { padding: 6px 0; }
   #rail label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   #rail input[type=checkbox] { accent-color: var(--ochre); }
-  /* ── Year scrubber (bottom) ──────────────────────────────── */
   #scrub {
     position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
     z-index: 10; width: 600px; max-width: 90vw;
@@ -74,7 +67,13 @@
                       font-size: 13px; color: var(--paper); font-weight: 400; }
   #scrub .head .v { color: var(--ochre); }
   #scrub input[type=range] { width: 100%; margin-top: 8px; accent-color: var(--ochre); }
-  /* Back link */
+  #scrub .play-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  #scrub button {
+    font-family: inherit; font-size: 11px; color: #cfbe98;
+    padding: 4px 10px; background: rgba(244,237,225,0.06);
+    border: 1px solid var(--rule); border-radius: 2px; cursor: pointer;
+  }
+  #scrub button:hover { color: var(--ochre); border-color: var(--ochre); }
   #back {
     position: fixed; top: 24px; right: 260px; z-index: 10;
     font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
@@ -93,8 +92,8 @@
 
 <div id="title">
   <div class="eyebrow">PC1 – PC3 flow · 200 k training sample</div>
-  <h1>How clearing pixels <em>move</em> in spectral feature space</h1>
-  <p>Each line is one detected pixel: green dot = pre-disturbance spectrum, orange dot = post-disturbance spectrum, in the same 3-D Δ-PC frame the dashboard's HDBSCAN clustering operates on. Drag to orbit, scroll to zoom. Use the year slider to play the flow forwards in time.</p>
+  <h1>How clearing pixels <em>flow</em> in spectral feature space</h1>
+  <p>Each particle is one detected pixel, animated from its pre-disturbance spectrum to its post-disturbance spectrum in the same 3-D Δ-PC frame the dashboard's HDBSCAN clustering operates on. The release time of each particle is set by its detection year — earlier-cleared pixels move first, later ones follow. The pale background cloud is the combined pre+post density envelope.</p>
 </div>
 
 <div id="rail">
@@ -106,20 +105,20 @@
   <div class="toggle-row"><label><input type="checkbox" data-grp="severe" checked><span class="sw" style="background:#b73a3a;"></span>Severe</label></div>
   <div class="toggle-row"><label><input type="checkbox" data-grp="heavy" checked><span class="sw" style="background:#d46d45;"></span>Heavy</label></div>
   <div class="toggle-row"><label><input type="checkbox" data-grp="moderate" checked><span class="sw" style="background:#e7b27e;"></span>Moderate</label></div>
-  <h3 style="margin-top: 12px;">Cloud overlay</h3>
-  <div class="toggle-row"><label><input type="checkbox" id="t-pre" checked><span class="sw" style="background:#8caf82;"></span>pre cloud</label></div>
-  <div class="toggle-row"><label><input type="checkbox" id="t-post" checked><span class="sw" style="background:#c76340;"></span>post cloud</label></div>
-  <div class="toggle-row"><label><input type="checkbox" id="t-flow" checked>flow lines</label></div>
+  <h3 style="margin-top: 12px;">Layers</h3>
+  <div class="toggle-row"><label><input type="checkbox" id="t-flow" checked>flow particles</label></div>
+  <div class="toggle-row"><label><input type="checkbox" id="t-cloud" checked>density cloud (pre+post)</label></div>
 </div>
 
 <div id="scrub">
   <div class="head">
-    <span class="lbl">Year window</span>
-    <span class="v" id="scrub-v">2015 – 2024</span>
+    <span class="lbl">Time in flow cycle</span>
+    <span class="v" id="scrub-v">2015</span>
   </div>
-  <input type="range" id="scrub-y" min="2015" max="2024" step="1" value="2024">
-  <div style="font-size:9px;color:var(--muted);margin-top:4px;">
-    drag = highest year shown; lines fade older → newer (viridis)
+  <input type="range" id="scrub-t" min="0" max="1000" step="1" value="0">
+  <div class="play-row">
+    <button id="play-btn">▶ play</button>
+    <span style="font-size:9px;color:var(--muted);">cycle = 8 s · earlier-clearing pixels move first; later ones follow in a wave</span>
   </div>
 </div>
 
@@ -128,29 +127,25 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const RAW_URL = 'data/pca_flow_sample.json';
-let raw = null, scene, camera, renderer, controls;
-let lineMesh, preMesh, postMesh;
-let hiddenGrps = new Set();
-let yearMax = 2024;
-let showPre = true, showPost = true, showFlow = true;
+const CYCLE_SEC = 8.0;       // total animation period
+const TRAVEL_FRAC = 0.25;    // fraction of cycle each particle takes to traverse pre→post
+const YR_MIN = 2015, YR_MAX = 2024;
 
-// ── Viridis-like palette (continuous year colour) ─────────────────
-function viridis(t) {
-  const stops = [
-    [0.267, 0.005, 0.329],  // 0.0
-    [0.275, 0.193, 0.494],  // 0.2
-    [0.213, 0.359, 0.553],  // 0.4
-    [0.135, 0.518, 0.557],  // 0.5
-    [0.122, 0.639, 0.530],  // 0.6
-    [0.418, 0.781, 0.422],  // 0.8
-    [0.992, 0.906, 0.143],  // 1.0
-  ];
-  const n = stops.length - 1;
-  const i = Math.min(n - 1, Math.max(0, Math.floor(t * n)));
-  const f = t * n - i;
-  const a = stops[i], b = stops[i + 1];
-  return [a[0] + f*(b[0]-a[0]), a[1] + f*(b[1]-a[1]), a[2] + f*(b[2]-a[2])];
-}
+let raw = null, scene, camera, renderer, controls;
+let flowPoints, cloudPoints;
+let hiddenGrps = new Set();
+let showFlow = true, showCloud = true;
+let playing = true;
+let manualPhase = 0;     // [0,1] when user drags the scrubber
+let lastTime = performance.now() / 1000;
+let phase = 0;           // current animation phase, [0,1]
+
+// Chip group → RGB (matches main dashboard)
+const GRP_COL = {
+  severe:   [0.718, 0.227, 0.227],
+  heavy:    [0.831, 0.427, 0.271],
+  moderate: [0.906, 0.698, 0.494],
+};
 
 function init() {
   scene = new THREE.Scene();
@@ -166,112 +161,216 @@ function init() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
-  controls.target.set(-2, 0.5, 1);
+  // Camera target at the data centroid so the orbit rotates around it.
+  controls.target.set(-2, 0, 1);
+  // Camera position offset from target so the data is in frame.
+  camera.position.set(-2 + 8, 6, 1 + 10);
+  camera.lookAt(-2, 0, 1);
 
-  // Subtle 3-axis grid + axis lines
   drawAxes();
-
   window.addEventListener('resize', onResize);
   animate();
 }
 
 function drawAxes() {
-  // Three orthogonal axes in PC space, spanning roughly the data range
-  const axesGroup = new THREE.Group();
-  const axisDef = [
-    { dir: [1,0,0], col: 0x9c8b6e, len: 4, label: 'PC1' },
-    { dir: [0,1,0], col: 0x9c8b6e, len: 4, label: 'PC2' },
-    { dir: [0,0,1], col: 0x9c8b6e, len: 4, label: 'PC3' },
+  // Axes extend through origin in both directions so the data cloud
+  // (centred near PC1≈-2, PC2≈0, PC3≈+1) sits inside the frame, not
+  // floating off in the +PC1 direction.  Tick marks at integer PC
+  // values give a sense of scale.
+  const grp = new THREE.Group();
+  const axes = [
+    { dir:[1,0,0], len:4, label:'PC1' },
+    { dir:[0,1,0], len:4, label:'PC2' },
+    { dir:[0,0,1], len:4, label:'PC3' },
   ];
-  for (const a of axisDef) {
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(a.dir[0]*a.len, a.dir[1]*a.len, a.dir[2]*a.len),
+  for (const a of axes) {
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-a.dir[0]*a.len, -a.dir[1]*a.len, -a.dir[2]*a.len),
+      new THREE.Vector3( a.dir[0]*a.len,  a.dir[1]*a.len,  a.dir[2]*a.len),
     ]);
-    axesGroup.add(new THREE.Line(geom, new THREE.LineBasicMaterial({
-      color: a.col, transparent: true, opacity: 0.45 })));
-  }
-  // Labels via sprite
-  axisDef.forEach(a => {
+    grp.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: 0x9c8b6e, transparent: true, opacity: 0.45 })));
+    // +ve label
     const sp = makeTextSprite(a.label, '#e7c798');
     sp.position.set(a.dir[0]*(a.len+0.4), a.dir[1]*(a.len+0.4), a.dir[2]*(a.len+0.4));
-    axesGroup.add(sp);
-  });
-  // Faint grid on PC1-PC2 plane
+    grp.add(sp);
+    // -ve label
+    const spNeg = makeTextSprite('-' + a.label, '#9c8b6e');
+    spNeg.position.set(-a.dir[0]*(a.len+0.4), -a.dir[1]*(a.len+0.4), -a.dir[2]*(a.len+0.4));
+    grp.add(spNeg);
+    // tick marks at unit intervals
+    for (let t = -a.len + 1; t < a.len; t++) {
+      if (t === 0) continue;
+      const tg = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(a.dir[0]*t - 0.05*a.dir[1] - 0.05*a.dir[2],
+                          a.dir[1]*t - 0.05*a.dir[2] - 0.05*a.dir[0],
+                          a.dir[2]*t - 0.05*a.dir[0] - 0.05*a.dir[1]),
+        new THREE.Vector3(a.dir[0]*t + 0.05*a.dir[1] + 0.05*a.dir[2],
+                          a.dir[1]*t + 0.05*a.dir[2] + 0.05*a.dir[0],
+                          a.dir[2]*t + 0.05*a.dir[0] + 0.05*a.dir[1]),
+      ]);
+      grp.add(new THREE.Line(tg, new THREE.LineBasicMaterial({
+        color: 0x9c8b6e, transparent: true, opacity: 0.30 })));
+    }
+  }
+  // Grid at PC3 = 0 plane, spanning [-4, +4] in PC1 × PC2 — centred on origin.
   const grid = new THREE.GridHelper(8, 8, 0x4a3f2a, 0x2a2418);
   grid.rotation.x = Math.PI / 2;
-  grid.material.transparent = true; grid.material.opacity = 0.35;
-  axesGroup.add(grid);
-  scene.add(axesGroup);
+  grid.material.transparent = true; grid.material.opacity = 0.25;
+  grp.add(grid);
+  scene.add(grp);
 }
 
 function makeTextSprite(text, color) {
   const c = document.createElement('canvas'); c.width = 128; c.height = 64;
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, 128, 64);
   g.fillStyle = color;
   g.font = 'bold 32px JetBrains Mono, monospace';
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(text, 64, 32);
   const tex = new THREE.CanvasTexture(c);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-  const sp = new THREE.Sprite(mat); sp.scale.set(0.8, 0.4, 1);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(0.8, 0.4, 1);
   return sp;
 }
 
-function rebuild() {
+// ── Build the animated flow-particle cloud ────────────────────────
+//
+// One Points geometry with N vertices; vertex shader interpolates
+// each vertex from pre→post over a per-vertex phase window keyed to
+// the pixel's detection year.  uPhase cycles 0→1 over CYCLE_SEC,
+// each particle's release time is yearNorm * (1 − TRAVEL_FRAC) so
+// the wave of pixels sweeps PC space in detection-year order.
+const FLOW_VS = `
+  attribute vec3 aPre;
+  attribute vec3 aPost;
+  attribute float aRelease;     // release time in [0, 1 - TRAVEL_FRAC]
+  attribute vec3 aColor;
+  uniform float uPhase;
+  uniform float uTravelFrac;
+  varying vec3 vColor;
+  varying float vT;
+  void main() {
+    float t = clamp((uPhase - aRelease) / uTravelFrac, 0.0, 1.0);
+    vec3 pos = mix(aPre, aPost, t);
+    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = 7.0 * (180.0 / -mv.z);
+    vColor = aColor;
+    vT = t;
+  }`;
+const FLOW_FS = `
+  varying vec3 vColor;
+  varying float vT;
+  void main() {
+    vec2 c = gl_PointCoord - 0.5;
+    float d = length(c);
+    if (d > 0.5) discard;
+    // Pulse: brighter mid-flight, dimmer at endpoints, so the
+    // moving wave reads strongly while at-rest particles fade back
+    float pulse = 0.35 + 0.65 * smoothstep(0.0, 0.15, vT) * (1.0 - smoothstep(0.85, 1.0, vT));
+    float a = pulse * (1.0 - d * 1.6);
+    gl_FragColor = vec4(vColor, a);
+  }`;
+
+function buildFlow() {
+  if (flowPoints) { scene.remove(flowPoints); flowPoints.geometry.dispose(); flowPoints.material.dispose(); flowPoints = null; }
   if (!raw) return;
-  if (lineMesh) { scene.remove(lineMesh); lineMesh.geometry.dispose(); lineMesh.material.dispose(); }
-  if (preMesh)  { scene.remove(preMesh);  preMesh.geometry.dispose();  preMesh.material.dispose(); }
-  if (postMesh) { scene.remove(postMesh); postMesh.geometry.dispose(); postMesh.material.dispose(); }
+  const rows = raw.rows.filter(r => !hiddenGrps.has(r.grp));
+  const N = rows.length;
+  if (!N) return;
+  const aPre = new Float32Array(N*3);
+  const aPost = new Float32Array(N*3);
+  const aRelease = new Float32Array(N);
+  const aColor = new Float32Array(N*3);
+  const yrNorm = (y) => (y - YR_MIN) / Math.max(1, YR_MAX - YR_MIN);
+  for (let i = 0; i < N; i++) {
+    const r = rows[i];
+    aPre[i*3+0]  = r.pre[0];  aPre[i*3+1]  = r.pre[1];  aPre[i*3+2]  = r.pre[2];
+    aPost[i*3+0] = r.post[0]; aPost[i*3+1] = r.post[1]; aPost[i*3+2] = r.post[2];
+    aRelease[i]  = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
+    const [cr, cg, cb] = GRP_COL[r.grp] || [0.7, 0.7, 0.7];
+    aColor[i*3+0] = cr; aColor[i*3+1] = cg; aColor[i*3+2] = cb;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('aPre',     new THREE.BufferAttribute(aPre, 3));
+  geom.setAttribute('aPost',    new THREE.BufferAttribute(aPost, 3));
+  geom.setAttribute('aRelease', new THREE.BufferAttribute(aRelease, 1));
+  geom.setAttribute('aColor',   new THREE.BufferAttribute(aColor, 3));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uPhase: { value: 0 },
+      uTravelFrac: { value: TRAVEL_FRAC },
+    },
+    vertexShader: FLOW_VS,
+    fragmentShader: FLOW_FS,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  flowPoints = new THREE.Points(geom, mat);
+  scene.add(flowPoints);
+}
 
-  const yMin = 2015, yMax = yearMax;
-  const linePos = [], lineCol = [];
-  const prePos = [], preCol = [];
-  const postPos = [], postCol = [];
+// ── Density cloud (combined pre + post) ───────────────────────────
+//
+// Static, additive-blended point cloud over pre + post positions.
+// Where points cluster, additive blending sums alpha into a bright
+// envelope — visually a KDE-style density cloud without needing
+// marching-cubes isosurface extraction.  Two passes (large soft +
+// small bright) give a soft halo + crisp core that reads as contour.
+function buildCloud() {
+  if (cloudPoints) { scene.remove(cloudPoints); cloudPoints.geometry.dispose(); cloudPoints.material.dispose(); cloudPoints = null; }
+  if (!raw) return;
+  const rows = raw.rows.filter(r => !hiddenGrps.has(r.grp));
+  const N = rows.length;
+  if (!N) return;
+  // Pack pre then post into one cloud (2N points)
+  const pos = new Float32Array(N*2*3);
+  for (let i = 0; i < N; i++) {
+    pos[i*3+0]   = rows[i].pre[0];
+    pos[i*3+1]   = rows[i].pre[1];
+    pos[i*3+2]   = rows[i].pre[2];
+    pos[(N+i)*3+0] = rows[i].post[0];
+    pos[(N+i)*3+1] = rows[i].post[1];
+    pos[(N+i)*3+2] = rows[i].post[2];
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  // Big soft halo. PointsMaterial with additive gives summed-density visual.
+  const mat = new THREE.PointsMaterial({
+    color: 0xc7b48a,
+    size: 0.42,
+    transparent: true,
+    opacity: 0.07,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  cloudPoints = new THREE.Points(geom, mat);
+  scene.add(cloudPoints);
+}
 
-  for (const r of raw.rows) {
-    if (hiddenGrps.has(r.grp)) continue;
-    if (r.year > yMax) continue;
-    const t = (r.year - yMin) / Math.max(1, (2024 - yMin));
-    const [vr, vg, vb] = viridis(t);
-    linePos.push(r.pre[0],  r.pre[1],  r.pre[2]);
-    linePos.push(r.post[0], r.post[1], r.post[2]);
-    lineCol.push(vr, vg, vb, vr, vg, vb);
-    prePos.push(r.pre[0],  r.pre[1],  r.pre[2]);   preCol.push(0.55, 0.69, 0.51);
-    postPos.push(r.post[0], r.post[1], r.post[2]); postCol.push(0.78, 0.39, 0.25);
-  }
-
-  if (showFlow && linePos.length) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
-    g.setAttribute('color',    new THREE.Float32BufferAttribute(lineCol, 3));
-    lineMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.55 }));
-    scene.add(lineMesh);
-  }
-  if (showPre && prePos.length) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(prePos, 3));
-    g.setAttribute('color',    new THREE.Float32BufferAttribute(preCol, 3));
-    preMesh = new THREE.Points(g, new THREE.PointsMaterial({
-      vertexColors: true, size: 0.10, transparent: true, opacity: 0.85,
-      sizeAttenuation: true }));
-    scene.add(preMesh);
-  }
-  if (showPost && postPos.length) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(postPos, 3));
-    g.setAttribute('color',    new THREE.Float32BufferAttribute(postCol, 3));
-    postMesh = new THREE.Points(g, new THREE.PointsMaterial({
-      vertexColors: true, size: 0.10, transparent: true, opacity: 0.85,
-      sizeAttenuation: true }));
-    scene.add(postMesh);
-  }
+function updatePhase() {
+  if (!playing) { phase = manualPhase; return; }
+  const now = performance.now() / 1000;
+  const dt = now - lastTime; lastTime = now;
+  phase = (phase + dt / CYCLE_SEC) % 1.0;
+  // Reflect to scrubber
+  const s = document.getElementById('scrub-t');
+  s.value = Math.round(phase * 1000);
+  manualPhase = phase;
 }
 
 function animate() {
   requestAnimationFrame(animate);
+  updatePhase();
+  if (flowPoints) flowPoints.material.uniforms.uPhase.value = phase;
+  // Reflect phase as a "year"-style readout for the user
+  // (year roughly equals YR_MIN + phase * (YR_MAX - YR_MIN), since
+  // particles release in year order).
+  document.getElementById('scrub-v').textContent =
+    `~ ${Math.round(YR_MIN + phase * (YR_MAX - YR_MIN))}`;
   controls.update();
   renderer.render(scene, camera);
 }
@@ -282,6 +381,11 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+function rebuildAll() {
+  if (showFlow)  buildFlow();  else if (flowPoints)  { scene.remove(flowPoints);  flowPoints.geometry.dispose();  flowPoints.material.dispose();  flowPoints = null; }
+  if (showCloud) buildCloud(); else if (cloudPoints) { scene.remove(cloudPoints); cloudPoints.geometry.dispose(); cloudPoints.material.dispose(); cloudPoints = null; }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────
 fetch(RAW_URL).then(r => r.json()).then(j => {
   raw = j;
@@ -289,7 +393,7 @@ fetch(RAW_URL).then(r => r.json()).then(j => {
   document.getElementById('evr-2').textContent = (j.pc_evr[1]*100).toFixed(0) + '% var';
   document.getElementById('evr-3').textContent = (j.pc_evr[2]*100).toFixed(0) + '% var';
   init();
-  rebuild();
+  rebuildAll();
 });
 
 // ── Controls ──────────────────────────────────────────────────────
@@ -297,16 +401,23 @@ document.querySelectorAll('input[data-grp]').forEach(el => {
   el.addEventListener('change', () => {
     const g = el.dataset.grp;
     if (el.checked) hiddenGrps.delete(g); else hiddenGrps.add(g);
-    rebuild();
+    rebuildAll();
   });
 });
-document.getElementById('t-pre').addEventListener('change',  e => { showPre  = e.target.checked; rebuild(); });
-document.getElementById('t-post').addEventListener('change', e => { showPost = e.target.checked; rebuild(); });
-document.getElementById('t-flow').addEventListener('change', e => { showFlow = e.target.checked; rebuild(); });
-document.getElementById('scrub-y').addEventListener('input', e => {
-  yearMax = +e.target.value;
-  document.getElementById('scrub-v').textContent = `2015 – ${yearMax}`;
-  rebuild();
+document.getElementById('t-flow').addEventListener('change',  e => { showFlow  = e.target.checked; rebuildAll(); });
+document.getElementById('t-cloud').addEventListener('change', e => { showCloud = e.target.checked; rebuildAll(); });
+document.getElementById('scrub-t').addEventListener('input', e => {
+  manualPhase = (+e.target.value) / 1000;
+  if (playing) {
+    playing = false;
+    document.getElementById('play-btn').textContent = '▶ play';
+  }
+  phase = manualPhase;
+});
+document.getElementById('play-btn').addEventListener('click', () => {
+  playing = !playing;
+  document.getElementById('play-btn').textContent = playing ? '❙❙ pause' : '▶ play';
+  if (playing) lastTime = performance.now() / 1000;
 });
 </script>
 </body>
