@@ -7,12 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- Preload the heaviest data payloads so the browser starts fetching
-     them during HTML/script parsing, not after.  Cuts ~0.5-1 s off the
-     empty-globe phase on a typical 10-30 Mbps connection.  Coarse hex
-     JSON (~8.3 MB) is always needed; fine hex (53 MB) is lazy. -->
-<link rel="preload" as="fetch" type="application/json" crossorigin
-      href="data/sarawak_hexes_2of3_res7.json">
+<!-- Preload only the small JSONs (cluster meta < 30 KB, manifest < 1 KB).
+     The 8.3 MB coarse hex JSON is intentionally NOT preloaded — putting
+     it in <link rel="preload"> made the browser start that download in
+     parallel with the critical JS (three.js, globe.js, etc.), which on
+     bandwidth-limited connections delayed the first globe paint.  It
+     loads via the inline fetch() further down once the globe is already
+     on screen — that's the right priority order: paint the globe, then
+     stream the dots in. -->
 <link rel="preload" as="fetch" type="application/json" crossorigin
       href="data/sarawak_cluster_meta.json">
 <link rel="preload" as="fetch" type="application/json" crossorigin
