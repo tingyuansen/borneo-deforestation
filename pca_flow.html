@@ -161,10 +161,10 @@ function init() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
-  // Sample is pre-centred around origin (centroid subtracted in the
-  // data prep) so camera target = origin.
+  // Sample is pre-centred around origin in RAW Δ-PC (not whitened).
+  // PC1 extent is ~2× PC2/PC3 — natural variance ordering preserved.
   controls.target.set(0, 0, 0);
-  camera.position.set(8, 6, 10);
+  camera.position.set(18, 13, 22);
   camera.lookAt(0, 0, 0);
 
   drawAxes();
