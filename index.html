@@ -872,14 +872,11 @@
 
 <!-- Spectrum panel — compact clock-style widget at top-right.  Radar
      scaffold is always drawn; pre/post polygons swap as cursor crosses
-     dots in per-pixel view.  Single text line under the radar carries
-     the cluster id + tag (or the empty-state hint). -->
+     dots in per-pixel view.  Caption is a static descriptor — the
+     panel is showing what the data SOURCE is, not the per-cluster id. -->
 <div id="spectrum-panel">
   <div id="sp-svg"></div>
-  <div class="sp-line" id="sp-line">
-    <span class="sw" style="background:#8caf82;"></span>pre
-    <span class="sw" style="background:#c76340;"></span>post
-  </div>
+  <div class="sp-line">photometric measurement<br/>from Sentinel-2</div>
 </div>
 <div id="inspector">
   <div class="ins-head">
@@ -1586,17 +1583,9 @@ function spectrumRadarSVG(meanPre, meanPost) {
 function showSpectrumPanel(cmeta) {
   const panel = document.getElementById('spectrum-panel');
   if (!panel) return;
-  const lineEl = document.getElementById('sp-line');
-  const svgEl  = document.getElementById('sp-svg');
+  const svgEl = document.getElementById('sp-svg');
   // Radar scaffold always rendered; polygons swap with cmeta state.
   svgEl.innerHTML = spectrumRadarSVG(cmeta && cmeta.mean_pre, cmeta && cmeta.mean_post);
-  if (!cmeta) {
-    lineEl.innerHTML =
-      `<span class="sw" style="background:#8caf82;"></span>pre` +
-      `<span class="sw" style="background:#c76340;"></span>post`;
-  } else {
-    lineEl.innerHTML = `c${cmeta.id} · ${cmeta.tag} · mag ${cmeta.mag.toFixed(2)}`;
-  }
   panel.classList.add('visible');
 }
 function hideSpectrumPanel() {
