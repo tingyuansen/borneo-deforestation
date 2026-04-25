@@ -1416,16 +1416,25 @@ function setupPlaceSearch() {
     }
     input.blur();
     if (document.body.classList.contains('in-tile-view')) {
-      // Tile view: re-centre at zoom 11 (mid-LOD; fine-hex aggregate).
-      // User can wheel in afterwards if they want per-pixel detail.
+      // Already in tile view → just re-centre at the same zoom the
+      // Baram template opens at (13.2, fine-hex / per-pixel boundary).
       if (window.TileView && window.TileView.setView) {
-        window.TileView.setView({ center: [lon, lat], zoom: 11 });
+        window.TileView.setView({ center: [lon, lat], zoom: 13.2 });
       }
     } else if (typeof globe !== 'undefined' && globe) {
-      // Globe view: 2.0 dist puts the point prominent in frame but
-      // stays well above AUTO_TILE_DIST (1.25), so the auto-bridge
-      // won't slingshot the user into tile view mid-animation.
-      globe.flyTo(lon, lat, 2.0, 1800);
+      // Globe view → mirror the existing flyToBorneo flow: fly the
+      // camera close to the searched place, then open the tile view
+      // centred there. dist 1.12 matches the Baram fly-in distance.
+      // _suppressAutoTile blocks setupZoomIndicator's 200 ms poll from
+      // racing us and opening the tile view at Baram before we land.
+      window._suppressAutoTile = true;
+      globe.setAutoRotate(false);
+      globe.flyTo(lon, lat, 1.12, 2200).then(() => {
+        openTileView({ center: [lon, lat], zoom: 13.2 });
+        // Released after openTileView so the bridge sees in-tile-view
+        // class already set and won't re-fire.
+        window._suppressAutoTile = false;
+      });
     }
   }
   function handleSubmit() {
@@ -2037,11 +2046,16 @@ function setupTweaks() {
 }
 
 /* ═════════════ Tile view open/close ═════════════ */
-function openTileView() {
+function openTileView(opts) {
   const tt = document.getElementById('tooltip');
+  // Optional override of center/zoom — used by place-search to land
+  // anywhere the user types. Default lands on the Baram pilot ROI,
+  // matching the existing flyToBorneo / globe-click gesture.
+  const center = (opts && opts.center) || [114.05, 4.05];
+  const zoom   = (opts && typeof opts.zoom === 'number') ? opts.zoom : 13.2;
   window.TileView.open({
-    center: [114.05, 4.05],
-    zoom: 13.2,
+    center,
+    zoom,
     points: window._points,
     visible: window._passes,
     // Spectrum panel update on hover.  Per-pixel view only — at hex
