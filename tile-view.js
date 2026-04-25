@@ -871,6 +871,25 @@
 
     // Debounced push of viewport counts to the histogram.
     notifyViewportHist();
+    // Drive the bottom-right "Streaming detection tiles…" pill.  Visible
+    // when at least one fetch is in flight; hidden as soon as the
+    // viewport's pixel data is fully loaded.
+    updateTilePill();
+  }
+
+  // Tile-stream pill driver.  Shown whenever binFetching is non-empty
+  // AND we're at per-pixel zoom (where the user actually expects dots).
+  function updateTilePill() {
+    const pill = document.getElementById('tile-pill');
+    if (!pill) return;
+    const fetching = binFetching.size;
+    const wantPixels = opened && zoom >= 12;
+    if (wantPixels && fetching > 0) {
+      pill.textContent = `Streaming detection tiles… ${fetching} fetching`;
+      pill.classList.add('show');
+    } else {
+      pill.classList.remove('show');
+    }
   }
 
   // ── Public ─────────────────────────────────────────────────────────
@@ -915,6 +934,55 @@
       zoom = Math.max(3, Math.min(18, zoom + delta));
       if (onZoom) onZoom(zoom);
       draw();
+    },
+    // Eagerly fetch *both* layers (.bin pixel tiles + Esri imagery
+    // tiles) that will be visible at (center, zoom).  Used during
+    // fly-in animations (Baram, place-search) and from setView so
+    // network round-trips overlap the camera animation instead of
+    // appearing as a blank/empty viewport on arrival.  Safe to call
+    // before TileView.open() (no-op until manifest loaded).
+    prefetch({ center: pc, zoom: pz }) {
+      if (!Array.isArray(pc) || pc.length !== 2) return;
+      const lon = pc[0], lat = pc[1];
+      const targetZoom = (typeof pz === 'number') ? pz : 13.2;
+
+      // ── Imagery tiles — Esri World Imagery, 256-px Web-Mercator. ──
+      // The browser caches each tile's <img> in tileCache, so calling
+      // getTile() now means by the time _draw() runs at the new
+      // center/zoom the imagery is decoded and ready.
+      const zInt = Math.floor(targetZoom);
+      const cxImg = lon2x(lon, zInt), cyImg = lat2y(lat, zInt);
+      // ±4 tiles ≈ 1024 px window — covers any reasonable viewport.
+      const itx0 = Math.floor(cxImg / TILE_SIZE) - 4;
+      const itx1 = Math.floor(cxImg / TILE_SIZE) + 4;
+      const ity0 = Math.floor(cyImg / TILE_SIZE) - 4;
+      const ity1 = Math.floor(cyImg / TILE_SIZE) + 4;
+      const nTiles = Math.pow(2, zInt);
+      for (let ty = ity0; ty <= ity1; ty++) {
+        if (ty < 0 || ty >= nTiles) continue;
+        for (let tx = itx0; tx <= itx1; tx++) {
+          const tw = ((tx % nTiles) + nTiles) % nTiles;
+          getTile(zInt, tw, ty);    // schedules <img> load if not cached
+        }
+      }
+
+      // ── .bin per-pixel tiles — only matter at zoom ≥ 12. ──
+      if (targetZoom < 12) return;
+      if (!binManifest) loadBinManifest();
+      // ±2 .bin tiles = ±0.2° = ~22 km around target.  Covers any
+      // reasonable viewport at zoom 12+.
+      const ix0 = Math.max(0, Math.floor((lon - TILE_LON_MIN - 2*TILE_BIN_DEG) / TILE_BIN_DEG));
+      const ix1 = Math.min(TILE_GRID_COLS - 1, Math.floor((lon - TILE_LON_MIN + 2*TILE_BIN_DEG) / TILE_BIN_DEG));
+      const iy0 = Math.max(0, Math.floor((lat - TILE_LAT_MIN - 2*TILE_BIN_DEG) / TILE_BIN_DEG));
+      const iy1 = Math.min(TILE_GRID_ROWS - 1, Math.floor((lat - TILE_LAT_MIN + 2*TILE_BIN_DEG) / TILE_BIN_DEG));
+      const kick = () => {
+        for (let iy = iy0; iy <= iy1; iy++) {
+          for (let ix = ix0; ix <= ix1; ix++) fetchBinTile(iy, ix);
+        }
+        updateTilePill();
+      };
+      if (binManifest) kick();
+      else if (loadBinManifest._pending) loadBinManifest._pending.then(kick);
     },
     // Programmatic re-centre — used by the place-search box. Snaps to
     // (lon, lat) at the requested zoom (default keeps current zoom).

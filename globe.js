@@ -121,9 +121,16 @@
   }
 
   // ── Texture loader (external earth bitmap) ────────────────────────
-  function loadEarthTex(onReady) {
-    // Try several CDNs for a real Blue Marble-style texture, fall back to a
-    // procedural earthy painting if all fail or time out.
+  // Strategy: fire onReady() with the procedural texture IMMEDIATELY so
+  // the loading curtain dismisses in <500 ms.  Then continue trying the
+  // CDN URLs in the background; if/when one lands, call onUpgrade()
+  // to swap in the higher-quality Blue Marble texture without blocking
+  // the user.  Previous behaviour blocked the curtain for up to 4.5 s
+  // on slow connections waiting for the CDN race to resolve.
+  function loadEarthTex(onReady, onUpgrade) {
+    // Immediate: hand back the procedural Earth so the dashboard renders.
+    onReady(makeFallbackTex());
+    if (!onUpgrade) return;
     const urls = [
       'https://cdn.jsdelivr.net/npm/three-globe@2.31.1/example/img/earth-blue-marble.jpg',
       'https://unpkg.com/three-globe@2.31.1/example/img/earth-blue-marble.jpg',
@@ -132,18 +139,16 @@
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
     let done = false;
-    const fin = tex => { if (done) return; done = true; onReady(tex); };
-    // Timeout fallback so we never sit on a black globe.
-    const tid = setTimeout(() => fin(makeFallbackTex()), 4500);
     const tryNext = i => {
-      if (i >= urls.length) { clearTimeout(tid); return fin(makeFallbackTex()); }
+      if (done || i >= urls.length) return;
       loader.load(
         urls[i],
         tex => {
-          clearTimeout(tid);
+          if (done) return;
+          done = true;
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.anisotropy = 8;
-          fin(tex);
+          onUpgrade(tex);
         },
         undefined,
         () => tryNext(i + 1),
@@ -302,11 +307,25 @@
       const earth = new THREE.Mesh(earthGeo, earthMat);
       scene.add(earth);
 
-      loadEarthTex(tex => {
-        earthMat.map = tex;
-        earthMat.needsUpdate = true;
-        if (opts.onReady) opts.onReady();
-      });
+      loadEarthTex(
+        // onReady — fires synchronously with the procedural Earth so
+        // the loading curtain dismisses in <500 ms.  Curtain doesn't
+        // wait on the CDN race anymore.  The render loop's initial
+        // dirty=true bit picks this up on the next frame; no markDirty
+        // call (markDirty isn't installed until later in init).
+        tex => {
+          earthMat.map = tex;
+          earthMat.needsUpdate = true;
+          if (opts.onReady) opts.onReady();
+        },
+        // onUpgrade — silent swap when the Blue Marble texture lands.
+        // markDirty exists by now (CDN responses are async, post-init).
+        tex => {
+          earthMat.map = tex;
+          earthMat.needsUpdate = true;
+          if (renderer._markDirty) renderer._markDirty(3);
+        },
+      );
 
       // Atmosphere halo
       const atmoMat = new THREE.ShaderMaterial({

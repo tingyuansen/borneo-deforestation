@@ -789,6 +789,27 @@
   }
   /* Hide the spinner once we're in "ready" mode (just before fade-out). */
   #data-pill.done::before { display: none; }
+
+  /* Tile-stream pill — same look as #data-pill but bottom-right (so the
+     timeline brush can still occupy bottom-centre).  Driven by
+     TileView's binFetching state. */
+  #tile-pill {
+    position: fixed; bottom: 200px; right: 32px;
+    z-index: 30; pointer-events: none;
+    background: rgba(12,9,6,0.78); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2); border-radius: 999px;
+    padding: 6px 14px 6px 28px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    color: #cfbe98; letter-spacing: 0.06em;
+    opacity: 0; transition: opacity 0.25s ease;
+  }
+  #tile-pill.show { opacity: 1; }
+  #tile-pill::before {
+    content: ''; position: absolute; left: 10px; top: 50%; margin-top: -5px;
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid rgba(231,199,152,0.3); border-top-color: #e7c798;
+    animation: spin 0.9s linear infinite;
+  }
 </style>
 </head>
 <body>
@@ -798,6 +819,10 @@
   <div class="msg">Loading Earth texture · please wait</div>
 </div>
 <div id="data-pill">Streaming detections data…</div>
+<!-- Tile-streaming pill — shown in tile view at zoom ≥ 12 while .bin
+     tiles for the current viewport are still being fetched, so users
+     don't think there's no data here. -->
+<div id="tile-pill">Streaming detection tiles…</div>
 
 <div id="globe-mount"></div>
 
@@ -1372,6 +1397,11 @@ function boot() {
     _flying = true;
     try {
       globe.setAutoRotate(false);
+      // Start the .bin tile fetches *during* the 2.2 s fly-in animation
+      // so the per-pixel layer is cached by the time tile view opens.
+      if (window.TileView && window.TileView.prefetch) {
+        window.TileView.prefetch({ center: [114.05, 4.05], zoom: 13.2 });
+      }
       await globe.flyTo(114.05, 4.05, 1.12, 2200);
       openTileView();
     } finally { _flying = false; }
@@ -1502,6 +1532,13 @@ function setupPlaceSearch() {
       return;
     }
     input.blur();
+    // Kick off both tile-layer prefetches (Esri imagery + .bin pixels)
+    // for the destination viewport.  Fires regardless of which path
+    // we take below — by the time the camera settles, the network
+    // round-trips are already underway.
+    if (window.TileView && window.TileView.prefetch) {
+      window.TileView.prefetch({ center: [lon, lat], zoom: 13.2 });
+    }
     if (document.body.classList.contains('in-tile-view')) {
       // Already in tile view → just re-centre at the same zoom the
       // Baram template opens at (13.2, fine-hex / per-pixel boundary).
