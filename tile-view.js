@@ -868,5 +868,17 @@
       if (onZoom) onZoom(zoom);
       draw();
     },
+    // Programmatic re-centre — used by the place-search box. Snaps to
+    // (lon, lat) at the requested zoom (default keeps current zoom).
+    setView({ center: c, zoom: z }) {
+      if (Array.isArray(c) && c.length === 2) {
+        center = [c[0], c[1]];
+      }
+      if (typeof z === 'number') {
+        zoom = Math.max(3, Math.min(18, z));
+        if (onZoom) onZoom(zoom);
+      }
+      draw();
+    },
   };
 })();

@@ -53,6 +53,36 @@
   .hud-title {
     top: 28px; left: 32px; max-width: 420px; pointer-events: none;
   }
+
+  /* Place-search input — visible in both views (top-centre).
+     Datalist suggestions are a curated set of Sarawak places; typing
+     anything that doesn't resolve to one of them flashes an error and
+     does NOT navigate. */
+  .hud-search {
+    top: 28px; left: 50%; transform: translateX(-50%);
+  }
+  .hud-search input {
+    width: 280px; padding: 9px 16px;
+    border-radius: 999px;
+    background: rgba(12,9,6,0.65); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif; font-size: 13px;
+    letter-spacing: 0.01em;
+    outline: none; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .hud-search input::placeholder { color: var(--muted); }
+  .hud-search input:focus { border-color: #e7c798;
+    box-shadow: 0 0 0 3px rgba(231,199,152,0.10); }
+  .hud-search input.error {
+    border-color: #c65438; animation: hud-search-shake 0.32s;
+    color: #f0b09a;
+  }
+  @keyframes hud-search-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
   .kicker {
     display: inline-flex; align-items: center; gap: 10px;
     font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
@@ -816,6 +846,14 @@
 </div>
 -->
 
+<!-- HUD: place-search (top-centre, both views) -->
+<div class="hud hud-search">
+  <input type="text" id="place-search" list="places-list"
+         placeholder="Find a place in Sarawak (Kuching, Miri, Mulu…)"
+         autocomplete="off" spellcheck="false">
+  <datalist id="places-list"></datalist>
+</div>
+
 <!-- HUD: left rail (filters + how-to) -->
 <div class="hud hud-left">
   <!-- Detection-rule toggle removed: focusing on 2-of-3 primary only for
@@ -1258,6 +1296,7 @@ function boot() {
     if (document.body.classList.contains('in-tile-view')) return;
     flyToBorneo();
   });
+  setupPlaceSearch();
   document.getElementById('back-to-globe').addEventListener('click', () => {
     closeTileView();
     // Pull the globe camera back out past AUTO_TILE_DIST (1.25) — otherwise
@@ -1291,6 +1330,119 @@ function boot() {
   // open so particle counts reflect what's actually in the map view.
   const flowCanvas = document.getElementById('flow-canvas');
   if (flowCanvas && window.FlowPanel) window.FlowPanel.init(flowCanvas);
+}
+
+/* ═════════════ Place search ═════════════
+ * Curated lookup of named Sarawak places. Typing a name and hitting
+ * Enter (or picking an autocomplete suggestion) flies the globe to
+ * that lon/lat in globe view, or re-centres the slippy map in tile
+ * view. Anything that doesn't resolve to one of these entries is
+ * rejected — no silent navigation to random coordinates.  Also a
+ * belt-and-suspenders inSarawak() check on the looked-up coord
+ * catches any bad table entry I might add later.
+ *
+ * Source: regions.py + a few coastal/peninsula additions.  Ordering
+ * within the array doesn't matter (lookup is by name); the datalist
+ * orders alphabetically anyway. */
+const SARAWAK_PLACES = [
+  // Major cities (W → E)
+  ['Kuching',           110.34, 1.55],
+  ['Sibu',              111.83, 2.29],
+  ['Bintulu',           113.04, 3.17],
+  ['Miri',              113.99, 4.40],
+  // Coastal towns (W → E)
+  ['Sematan',           109.77, 1.81],
+  ['Lundu',             109.85, 1.66],
+  ['Sri Aman',          111.47, 1.24],
+  ['Betong',            111.52, 1.42],
+  ['Sarikei',           111.52, 2.13],
+  ['Mukah',             112.09, 2.90],
+  ['Limbang',           115.00, 4.75],
+  ['Lawas',             115.41, 4.86],
+  // Inland / interior towns
+  ['Serian',            110.57, 1.16],
+  ['Kapit',             112.94, 2.02],
+  ['Belaga',            113.77, 2.71],
+  ['Bario',             115.46, 3.76],
+  ['Marudi',            114.32, 4.18],
+  // National parks / protected areas
+  ['Mulu NP',           114.93, 4.12],
+  ['Niah NP',           113.77, 3.82],
+  ['Bako NP',           110.46, 1.72],
+  ['Lambir Hills NP',   114.04, 4.21],
+  // Pilot ROI + landmarks
+  ['Baram pilot ROI',   114.05, 4.05],
+  ['Bakun Dam',         114.07, 2.75],
+  ['Kelabit Highlands', 115.40, 3.70],
+];
+
+function setupPlaceSearch() {
+  const input = document.getElementById('place-search');
+  const dl    = document.getElementById('places-list');
+  if (!input || !dl) return;
+  // Populate the autocomplete suggestions, sorted A→Z.
+  const sorted = SARAWAK_PLACES.slice().sort((a, b) => a[0].localeCompare(b[0]));
+  dl.innerHTML = sorted.map(([name]) => `<option value="${name}"></option>`).join('');
+
+  function findPlace(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return null;
+    return SARAWAK_PLACES.find(p => p[0].toLowerCase() === q)
+        || SARAWAK_PLACES.find(p => p[0].toLowerCase().startsWith(q))
+        || SARAWAK_PLACES.find(p => p[0].toLowerCase().includes(q));
+  }
+  function showError(msg) {
+    input.classList.remove('error');
+    // Force reflow so the animation restarts on consecutive bad inputs.
+    void input.offsetWidth;
+    input.classList.add('error');
+    const original = 'Find a place in Sarawak (Kuching, Miri, Mulu…)';
+    input.placeholder = msg;
+    input.value = '';
+    setTimeout(() => {
+      input.classList.remove('error');
+      input.placeholder = original;
+    }, 2400);
+  }
+  function flyToPlace(p) {
+    const [name, lon, lat] = p;
+    // Belt-and-suspenders: refuse anything that, despite being in our
+    // list, somehow resolves outside Sarawak (catches typo'd table
+    // entries — never fires for the curated set, but keeps the safety
+    // story tight if someone extends the list later).
+    if (window.inSarawak && !window.inSarawak(lon, lat)) {
+      showError(`"${name}" not in Sarawak`);
+      return;
+    }
+    input.blur();
+    if (document.body.classList.contains('in-tile-view')) {
+      // Tile view: re-centre at zoom 11 (mid-LOD; fine-hex aggregate).
+      // User can wheel in afterwards if they want per-pixel detail.
+      if (window.TileView && window.TileView.setView) {
+        window.TileView.setView({ center: [lon, lat], zoom: 11 });
+      }
+    } else if (typeof globe !== 'undefined' && globe) {
+      // Globe view: 2.0 dist puts the point prominent in frame but
+      // stays well above AUTO_TILE_DIST (1.25), so the auto-bridge
+      // won't slingshot the user into tile view mid-animation.
+      globe.flyTo(lon, lat, 2.0, 1800);
+    }
+  }
+  function handleSubmit() {
+    const q = input.value;
+    if (!q.trim()) return;
+    const p = findPlace(q);
+    if (!p) {
+      showError(`"${q.slice(0, 24)}" not in our Sarawak places`);
+      return;
+    }
+    flyToPlace(p);
+  }
+  // 'change' fires when an autocomplete suggestion is picked OR when
+  // the input is committed (Enter / blur).  Enter also bubbles a
+  // 'keydown' for snappier feedback than waiting for blur.
+  input.addEventListener('change', handleSubmit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') handleSubmit(); });
 }
 
 function recencySize(d) {
