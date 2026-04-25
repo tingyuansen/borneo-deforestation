@@ -241,67 +241,133 @@ function makeTextSprite(text, color) {
 // the pixel's detection year.  uPhase cycles 0→1 over CYCLE_SEC,
 // each particle's release time is yearNorm * (1 − TRAVEL_FRAC) so
 // the wave of pixels sweeps PC space in detection-year order.
-// Flow particles — single PointsMaterial (no custom shader).  Vertex
-// positions are updated per frame in JS based on each pixel's release
-// time and the current animation phase.  Reliable across all WebGL
-// drivers; the shader-based version was rendering blank on some setups.
-const flowState = { rows: null, releases: null, dirty: false };
+// Flow particles — multi-layer PointsMaterial.  Each pixel renders
+// through (TAIL_LAYERS+1) Points objects: head + ghost layers, each
+// at a slight phase offset behind the head.  Per-frame JS updates
+// position AND colour for every layer.
+//
+// Colour rule: PRE colour (green #8caf82) → POST colour (orange
+// #c76340), interpolated by the particle's current t.  This avoids
+// the chip-rule controversy entirely — the colour ITSELF tells you
+// where the particle is in its journey.  Same green = pre marker
+// from the spectrum panel; same orange = post marker.
+const TAIL_LAYERS = 4;
+const TAIL_STEP   = TRAVEL_FRAC / 14.0;
+const flowLayers  = [];      // [{ points, offset }]
+const flowState   = { rows: null, releases: null };
+
+const PRE_COL  = [0.549, 0.686, 0.510];   // #8caf82
+const POST_COL = [0.780, 0.392, 0.251];   // #c76340
+
 function buildFlow() {
-  if (flowPoints) {
-    scene.remove(flowPoints); flowPoints.geometry.dispose(); flowPoints.material.dispose(); flowPoints = null;
+  for (const L of flowLayers) {
+    scene.remove(L.points); L.points.geometry.dispose(); L.points.material.dispose();
   }
+  flowLayers.length = 0;
+  flowPoints = null;
   if (!raw) return;
   const rows = raw.rows.filter(r => !hiddenGrps.has(r.grp));
   const N = rows.length;
   if (!N) return;
+
   const positions = new Float32Array(N*3);
-  const colors    = new Float32Array(N*3);
+  const colors    = new Float32Array(N*3);   // start = PRE_COL
   const releases  = new Float32Array(N);
   const yrNorm = (y) => (y - YR_MIN) / Math.max(1, YR_MAX - YR_MIN);
   for (let i = 0; i < N; i++) {
     const r = rows[i];
     positions[i*3+0] = r.pre[0]; positions[i*3+1] = r.pre[1]; positions[i*3+2] = r.pre[2];
-    const [cr, cg, cb] = GRP_COL[r.grp] || [0.7, 0.7, 0.7];
-    colors[i*3+0] = cr; colors[i*3+1] = cg; colors[i*3+2] = cb;
+    colors[i*3+0] = PRE_COL[0]; colors[i*3+1] = PRE_COL[1]; colors[i*3+2] = PRE_COL[2];
     releases[i] = yrNorm(r.year) * (1.0 - TRAVEL_FRAC);
   }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
-  const mat = new THREE.PointsMaterial({
-    vertexColors: true,
-    size: 0.16,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0.95,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  flowPoints = new THREE.Points(geom, mat);
-  flowPoints.renderOrder = 2;
-  scene.add(flowPoints);
+
+  for (let layer = 0; layer <= TAIL_LAYERS; layer++) {
+    const isHead = (layer === 0);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(positions), 3));
+    geom.setAttribute('color',    new THREE.Float32BufferAttribute(new Float32Array(colors),    3));
+    const opacity = isHead ? 0.95 : 0.55 * (1 - layer / (TAIL_LAYERS + 1));
+    const size    = isHead ? 0.20 : Math.max(0.06, 0.20 - layer * 0.035);
+    const mat = new THREE.PointsMaterial({
+      vertexColors: true, size, sizeAttenuation: true,
+      transparent: true, opacity, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pts = new THREE.Points(geom, mat);
+    pts.renderOrder = 2 - layer;
+    scene.add(pts);
+    flowLayers.push({ points: pts, offset: layer * TAIL_STEP });
+  }
+  flowPoints = flowLayers[0].points;
   flowState.rows     = rows;
   flowState.releases = releases;
-  flowState.dirty    = true;
-  console.log(`[pca_flow] built ${N} pixels (PointsMaterial, JS-side animation)`);
+  console.log(`[pca_flow] built ${N} pixels × ${TAIL_LAYERS+1} layers (head + ${TAIL_LAYERS} tail), green→orange t-coloured`);
+
+  buildChipArrows(rows);
 }
 
-// Per-frame position update — pure JS, ~5k float writes per frame.
+// Three thick arrows showing the median Δ-PC vector per chip, anchored
+// at each chip's median pre-PC centroid.  Reveals that Severe / Heavy
+// share a direction (~+PC1) while Moderate moves orthogonally — they
+// represent different physical processes, not just different magnitudes.
+const chipArrows = [];
+const CHIP_ARROW_COL = {
+  severe:   0xb73a3a,
+  heavy:    0xd46d45,
+  moderate: 0xe7b27e,
+};
+function buildChipArrows(rows) {
+  for (const a of chipArrows) scene.remove(a);
+  chipArrows.length = 0;
+  const median = (arr) => {
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+  };
+  for (const grp of ['severe', 'heavy', 'moderate']) {
+    const sub = rows.filter(r => r.grp === grp);
+    if (!sub.length) continue;
+    const preMed  = [0,1,2].map(k => median(sub.map(r => r.pre[k])));
+    const postMed = [0,1,2].map(k => median(sub.map(r => r.post[k])));
+    const dx = postMed[0] - preMed[0], dy = postMed[1] - preMed[1], dz = postMed[2] - preMed[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 0.01) continue;
+    const dir = new THREE.Vector3(dx, dy, dz).normalize();
+    const origin = new THREE.Vector3(preMed[0], preMed[1], preMed[2]);
+    const arrow = new THREE.ArrowHelper(dir, origin, len,
+      CHIP_ARROW_COL[grp], len * 0.18, len * 0.10);
+    arrow.line.material.linewidth = 3;
+    arrow.renderOrder = 4;
+    scene.add(arrow);
+    chipArrows.push(arrow);
+    console.log(`  arrow [${grp}]: from (${preMed.map(v=>v.toFixed(2))}) length ${len.toFixed(2)} dir (${dir.x.toFixed(2)},${dir.y.toFixed(2)},${dir.z.toFixed(2)})`);
+  }
+}
+
+// Per-frame: update position AND colour for every layer.
 function updateFlowPositions(p) {
-  if (!flowPoints || !flowState.rows) return;
+  if (!flowState.rows) return;
   const rows = flowState.rows;
   const releases = flowState.releases;
-  const arr = flowPoints.geometry.attributes.position.array;
   const tf = TRAVEL_FRAC;
-  for (let i = 0; i < rows.length; i++) {
-    let t = (p - releases[i]) / tf;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    const r = rows[i];
-    arr[i*3+0] = r.pre[0] + t * (r.post[0] - r.pre[0]);
-    arr[i*3+1] = r.pre[1] + t * (r.post[1] - r.pre[1]);
-    arr[i*3+2] = r.pre[2] + t * (r.post[2] - r.pre[2]);
+  for (const L of flowLayers) {
+    const pos = L.points.geometry.attributes.position.array;
+    const col = L.points.geometry.attributes.color.array;
+    const phaseL = p - L.offset;
+    for (let i = 0; i < rows.length; i++) {
+      let t = (phaseL - releases[i]) / tf;
+      if (t < 0) t = 0; else if (t > 1) t = 1;
+      const r = rows[i];
+      pos[i*3+0] = r.pre[0] + t * (r.post[0] - r.pre[0]);
+      pos[i*3+1] = r.pre[1] + t * (r.post[1] - r.pre[1]);
+      pos[i*3+2] = r.pre[2] + t * (r.post[2] - r.pre[2]);
+      col[i*3+0] = PRE_COL[0] + t * (POST_COL[0] - PRE_COL[0]);
+      col[i*3+1] = PRE_COL[1] + t * (POST_COL[1] - PRE_COL[1]);
+      col[i*3+2] = PRE_COL[2] + t * (POST_COL[2] - PRE_COL[2]);
+    }
+    L.points.geometry.attributes.position.needsUpdate = true;
+    L.points.geometry.attributes.color.needsUpdate    = true;
   }
-  flowPoints.geometry.attributes.position.needsUpdate = true;
 }
 
 // ── Density cloud (combined pre + post) ───────────────────────────
