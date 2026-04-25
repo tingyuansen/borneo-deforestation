@@ -191,18 +191,13 @@
   //                         which is exact for the total.
   const HIST_PIXEL_SWITCH = 12;   // mirror PIXEL_SWITCH in _draw()
   const HIST_HEX_FINE_SWITCH = 10;
-  // Align HIST_HIDDEN with the chip-strip's exclusion set (ocean
-  // clusters only). The previous list (added c3 + c13) was a v1-era
-  // carryover that excluded ~600k ha from the in-view aggregation
-  // while leaving them in the chip totals — the visible "chips don't
-  // sum to In view" mismatch at zoom-out came from that desync.
-  const HIST_HIDDEN = new Set([2, 11, 12, 15, 16]);   // = OCEAN_CLUSTERS
-  const HIST_SUSPECT = new Set([1, 4, 8, 9, 14, 18]);
   function buildViewportYearHist() {
     const CM = window.CLUSTER_META;
     if (!CM || !CM.clusters) return null;
     const tagOf = (cid) => cid === 255 ? 'outlier'
       : (CM.clusters[cid] && CM.clusters[cid].tag) || 'mixed';
+    const isTopo = (cid) =>
+      !!(CM.clusters[cid] && CM.clusters[cid].topo_flag);
     const hist = {};
     for (let y = 2015; y <= 2024; y++) hist[y] = {};
     const splitFrac = (typeof window.__baSplitX === 'number') ? window.__baSplitX : 0;
@@ -213,15 +208,15 @@
     const lon0 = Math.min(ul[0], br[0]), lon1 = Math.max(ul[0], br[0]);
     const lat0 = Math.min(ul[1], br[1]), lat1 = Math.max(ul[1], br[1]);
 
-    // Chip state (suspectHidden, hiddenClusters) is NOT applied here —
-    // the stacked histogram needs the full per-group totals so its
-    // y-scale stays stable; renderBars then hides toggled-off groups
-    // via a `visibility` attr. Filtering here caused the "bars get
-    // fatter on toggle" issue since yMax would fall when a group's
-    // contribution vanished.
+    // Chip state (hiddenClusters) is NOT applied here — the stacked
+    // histogram needs full per-group totals so its y-scale stays
+    // stable; renderBars hides toggled-off groups via visibility attr.
+    // Filtering here caused the "bars get fatter on toggle" issue.
+    // Filter is data-driven: deforest tag, not topo. Sarawak clip is
+    // applied per-hex in the loop below.
     const keepCid = (cid) => {
       if (cid === 255) return false;
-      if (HIST_HIDDEN.has(cid)) return false;
+      if (isTopo(cid)) return false;
       return tagOf(cid) === 'deforest';
     };
 
@@ -232,14 +227,9 @@
       // TOTAL (what drives the "In view" hectare readout) is exact.
       const fine = window.SARAWAK_HEXES_FINE;
       const useFine = zoom >= HIST_HEX_FINE_SWITCH && fine && fine.length;
-      const OCEAN_HEX = new Set([2, 11, 12, 15, 16]);
       // Coarse-zoom path reads SARAWAK_HEXES_COARSE directly (not the
-      // globe builder's `points`) so the in-view total uses the same
-      // exclusion set as the chip strip — ocean clusters only. The
-      // globe `points` array strips additional hexes for VISUAL reasons
-      // (mixed-tag, elev<3, etc.) that legitimately contain deforest
-      // pixels — using that as the count source under-reports by ~20%
-      // at full zoom-out.
+      // globe `points` array, which strips hexes for visual reasons).
+      // Hex tags + topo_flag + Sarawak polygon do all the filtering.
       // Include BOTH deforest- and mixed-tag hexes, Sarawak-only.
       // The bbox spills into Brunei/Sabah/Kalimantan — those should
       // not contribute to the "In view" hectare readout.
@@ -547,6 +537,8 @@
       if (CM && CM.clusters && CM.clusters[cid]) return CM.clusters[cid].tag;
       return 'mixed';
     };
+    const isTopoCluster = (cid) =>
+      !!(CM && CM.clusters && CM.clusters[cid] && CM.clusters[cid].topo_flag);
     // Hidden by cluster-id. Identified empirically via
     // scripts/15_cluster_elev_audit (per-cluster elevation + slope
     // distribution) — see sarawak/README.md §Known issues:
@@ -557,20 +549,11 @@
     //                 above 25° → topographic-illumination false
     //                 positives, not real canopy loss
     // Both groups go away on the final pipeline rerun (topo correction
-    // + stratified HDBSCAN); the hide-list is a V1 cleanup patch.
-    // Two tiers of exclusion:
-    //   HIDDEN  — never shown (ocean artefacts + coastal-regrowth).
-    //             These are legitimately off-map / noise.
-    //   SUSPECT — rendered pale yellow and gated by the 'suspect' chip.
-    //             Mountain-cohort clusters whose deforest signal is
-    //             likely topographic-illumination artefact; user can
-    //             toggle visibility.
-    const HIDDEN_CLUSTERS  = new Set([2, 3, 11, 12, 13, 15, 16]);
-    const SUSPECT_CLUSTERS = new Set([1, 4, 8, 9, 14, 18]);
-    const PALE_YELLOW = '#e8d9b8';
-    const suspectHidden = window._state
-      && window._state.hiddenGroups && window._state.hiddenGroups.has('suspect');
-
+    // Per-pixel filter is now data-driven (no v1-era hardcoded id lists):
+    //   - inSarawak()         drops Brunei/Sabah/Kalimantan
+    //   - cluster.topo_flag   drops C-correction artefacts on >10° slopes
+    //   - tag === 'deforest'  the only tag we paint
+    //   - hiddenClusters      chip toggle
     if (zoom >= PIXEL_SWITCH) {
       // ── Per-pixel labelled layer — stream .bin tiles on demand ──────
       // Each tile has 6 B/pixel (dx, dy, yr, cl). cl = HDBSCAN cluster id
@@ -606,21 +589,18 @@
         for (let i = 0; i < n; i += stride) {
           const cid = cl[i];
           if (cid === 255) continue;                 // propagation outlier
-          if (HIDDEN_CLUSTERS.has(cid)) continue;     // ocean + coastal regrowth
-          const isSuspect = SUSPECT_CLUSTERS.has(cid);
-          if (isSuspect && suspectHidden) continue;
-          const tag = tagOfCluster(cid);
-          if (tag === 'mixed') continue;
+          if (isTopoCluster(cid)) continue;          // topographic artefact
+          if (tagOfCluster(cid) !== 'deforest') continue;
           if (hiddenClusters && hiddenClusters.has(cid)) continue;
           if (yr[i] < yrLoRel || yr[i] > yrHiRel) continue;
           const lon = lonMin + dx[i] * tileInvScale;
           const lat = latMin + dy[i] * tileInvScale;
-          if (!inSarawak(lon, lat)) continue;     // Sarawak-only clip
+          if (!inSarawak(lon, lat)) continue;
           const sx = lon2x(lon, zoom) - cx + halfW;
           const sy = lat2y(lat, zoom) - cy + halfH;
           if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
-          ctx.fillStyle = isSuspect ? PALE_YELLOW : colorOfCluster(cid);
-          ctx.globalAlpha = isSuspect ? 0.4 : 0.82;
+          ctx.fillStyle = colorOfCluster(cid);
+          ctx.globalAlpha = 0.82;
           ctx.beginPath();
           ctx.arc(sx, sy, r, 0, Math.PI * 2);
           ctx.fill();

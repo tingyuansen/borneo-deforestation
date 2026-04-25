@@ -941,63 +941,22 @@ window._ensureFineHexes = ensureFineHexes;
 // Active dot-size mode. Mutable so tweaks drawer can change it.
 let DOT_SIZE_MODE = 'recency';  // 'recency' | 'uniform'
 
-// Clusters we don't trust, identified by the per-cluster elevation +
-// slope audit on the 643 M HDBSCAN labels:
-//   c2, c11, c12, c15, c16   centroids sit at or below sea level — the
-//                            tagging rule mis-binned them as regrowth /
-//                            water_ward but they're tidal-flat /
-//                            sun-glint coastal noise. Not rendered.
-//   c1, c9, c14              tagged deforest but median elev > 300 m and
-//                            slope-p95 > 25° — topographic-illumination
-//                            false positives. Rendered as muted pale
-//                            yellow so the map stays continuous but the
-//                            user sees "flagged here, probably not real".
-const OCEAN_CLUSTERS    = new Set([2, 11, 12, 15, 16]);
-// Mountain-suspect = deforest-tagged clusters whose members sit at
-// median elevation > 200 m AND have p95 slope > 23° in the HDBSCAN ×
-// SRTM audit. Adding c4, c8, c18 on top of the initial 1/9/14 set:
-// c18 alone is the biggest deforest cluster (3.9 M px in the 27 M
-// sample) and tracks the interior foothills 1:1.
-const MOUNTAIN_CLUSTERS = new Set([1, 4, 8, 9, 14, 18]);
-const PALE_YELLOW       = '#e8d9b8';
-const REGROWTH_COLOR    = '#4fa850';  // mid-green from the cluster palette
-
 function buildPoints() {
-  // Globe hex layer. Three display cohorts:
-  //   deforest (real, non-mountain): cream → crimson density ramp
-  //   deforest (mountain-suspect):   pale yellow (kept but obviously
-  //                                  downweighted, dim / small)
-  //   regrowth (non-ocean):          green (smaller signal, shown so
-  //                                  the Regrowth chip has something
-  //                                  to toggle)
-  // Everything else (ocean, mixed, water_ward) is excluded from the
-  // globe layer — the audit showed those pools are dominated by coastal
-  // artefacts and weak-signal attractors with no geographic meaning.
+  // Globe hex layer.  v3 single cohort: real-deforest hexes inside the
+  // GADM Sarawak boundary, with topo-flagged clusters dropped at filter
+  // time. Everything else is excluded — no v1-era 'flagged' / 'regrowth'
+  // / 'mountain' cohorts.
   const hexSource = SARAWAK_HEXES_COARSE;
   if (!hexSource || !hexSource.length) return [];
-  // Three display cohorts — everything else drops:
-  //   'deforest'   real inland deforestation cluster (red ramp)
-  //   'regrowth'   real inland regrowth (green, small)
-  //   'flagged'    mountain-suspect deforest ON LAND (pale yellow).
-  //                NOT mixed, NOT coastal-regrowth — those were previously
-  //                flagged-yellow and caused the sea-surface hex blanket
-  //                users saw off the coast. Now dropped entirely.
   // Chip-hidden clusters drop out of the ranked set entirely, so the
   // warm-to-crimson density ramp recalibrates over just the currently-
-  // shown clusters (otherwise toggling "Severe" off leaves the rest at
-  // the pale end of the ramp, which reads as "nothing is intense").
+  // shown clusters (toggling "Severe" off leaves the rest spanning the
+  // ramp, which reads as "the remaining clusters are still meaningful").
   const hiddenClusters = (window._state && window._state.hiddenClusters)
     || new Set();
-  const hiddenGroups   = (window._state && window._state.hiddenGroups)
-    || new Set();
-  // Sarawak-clip + topo-clip + tag-clip applied once.  v1-era OCEAN /
-  // MOUNTAIN / elev_m / mixed filters all replaced by:
-  //   - inSarawak() polygon clip (drops Brunei/Sabah/Kalimantan)
-  //   - cluster.topo_flag (drops ridge-line illumination artefacts)
-  //   - tag === 'deforest' (the only tag that paints on the globe)
   const _isInSarawak = window.inSarawak || (() => true);
-  const _meta = (CLUSTER_META && CLUSTER_META.clusters) || [];
-  const _byId = Object.fromEntries(_meta.map(c => [c.id, c]));
+  const _byId = Object.fromEntries(
+    (CLUSTER_META?.clusters || []).map(c => [c.id, c]));
   const visible = [];
   for (const h of hexSource) {
     if ((h.n || 0) === 0) continue;
@@ -1006,31 +965,19 @@ function buildPoints() {
     if (!cmeta || cmeta.topo_flag) continue;
     if (!_isInSarawak(h.lon, h.lat)) continue;
     if (hiddenClusters.has(h.cluster_id)) continue;   // chip toggle
-    h._cohort = 'deforest';
     visible.push(h);
   }
-  // Rank density colour only across the real-deforest cohort so the
-  // pale-yellow 'flagged' group doesn't pull the ramp.
-  const rankable = visible.filter(h => h._cohort === 'deforest');
   const rankOf = new Map();
-  const sorted = [...rankable].sort((a, b) => (a.n || 0) - (b.n || 0));
+  const sorted = [...visible].sort((a, b) => (a.n || 0) - (b.n || 0));
   const denom = Math.max(1, sorted.length - 1);
   for (let i = 0; i < sorted.length; i++) rankOf.set(sorted[i], i / denom);
   return visible.map(h => {
-    const cohort = h._cohort;
     const t = rankOf.get(h) ?? 0;
-    const color = cohort === 'flagged'  ? PALE_YELLOW
-                : cohort === 'regrowth' ? REGROWTH_COLOR
-                :                         hexDensityColor(t);
     return {
       lon: h.lon, lat: h.lat,
-      color,
-      size: cohort === 'flagged'  ? 0.5
-          : cohort === 'regrowth' ? 0.7
-          : (DOT_SIZE_MODE === 'uniform' ? 0.9 : (0.45 + t * 1.2)),
-      alpha: cohort === 'flagged'  ? 0.3
-           : cohort === 'regrowth' ? 0.7
-           : (0.45 + 0.4 * t),
+      color: hexDensityColor(t),
+      size: (DOT_SIZE_MODE === 'uniform' ? 0.9 : (0.45 + t * 1.2)),
+      alpha: 0.45 + 0.4 * t,
       bucket: 'sarawak',
       layer: 'hex',
       h3: h.h3, y: h.y, n: h.n, _rankT: t,
@@ -1041,7 +988,6 @@ function buildPoints() {
       deforest_n: h.deforest_n,
       tag: h.tag,
       cluster_id: h.cluster_id,
-      cohort,
     };
   });
 }
