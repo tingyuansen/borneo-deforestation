@@ -324,6 +324,19 @@
   }
   #tooltip .t-meta { font-family: 'JetBrains Mono', monospace;
     color: #cfbe98; font-size: 11px; letter-spacing: 0.04em; }
+  /* Spectrum mini-radar — per-cluster mean pre/post 10-band reflectance */
+  #tooltip .t-spectrum { margin: 8px 0 4px; }
+  #tooltip .t-spectrum svg { display: block; width: 180px; height: 180px; }
+  #tooltip .t-spectrum-axis { stroke: rgba(244,237,225,0.18); stroke-width: 0.5; fill: none; }
+  #tooltip .t-spectrum-grid { stroke: rgba(244,237,225,0.10); stroke-width: 0.5; fill: none; }
+  #tooltip .t-spectrum-label { font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
+    fill: #cfbe98; letter-spacing: 0.03em; text-anchor: middle; dominant-baseline: middle; }
+  #tooltip .t-spectrum-pre { fill: rgba(140, 175, 130, 0.18); stroke: #8caf82; stroke-width: 1.2; }
+  #tooltip .t-spectrum-post { fill: rgba(199, 99, 64, 0.18); stroke: #c76340; stroke-width: 1.2; }
+  #tooltip .t-spectrum-legend { display: flex; gap: 10px; font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; color: #cfbe98; letter-spacing: 0.04em; margin-top: 2px; }
+  #tooltip .t-spectrum-legend .sw { width: 8px; height: 8px; display: inline-block;
+    border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 
   /* Inspector (pinned on click) */
   #inspector {
@@ -1495,6 +1508,57 @@ function updateRangeLabel() {
     : `${fmt(t0)} – ${fmt(t1)}`;
 }
 
+/* ═════════════ Spectrum mini-radar (cluster archetype) ═════════════ */
+// Per-cluster pre/post mean reflectance shown as overlaid 10-axis radar
+// polygons.  Source data: cluster_meta.json[cid].mean_pre / mean_post,
+// each a length-10 array of band reflectances in {B02,B03,B04,B05,B06,
+// B07,B08,B8A,B11,B12} order.  This is the *cluster archetype* — every
+// pixel labelled with the same cluster shares this shape, which is
+// what the cluster IS statistically.  Per-pixel variation around the
+// archetype would need pre_B*/post_B* in the .bin tiles (a Stage-2
+// re-aggregation we've deferred).
+const SPECTRUM_BANDS = ['B02','B03','B04','B05','B06','B07','B08','B8A','B11','B12'];
+const SPECTRUM_RMAX  = 0.5;   // reflectance scale: typical canopy / bare soil sits below ~0.5
+function spectrumSVG(meanPre, meanPost) {
+  if (!meanPre || !meanPost || meanPre.length !== 10 || meanPost.length !== 10) return '';
+  const W = 180, H = 180, cx = W/2, cy = H/2, R = 64;
+  const N = 10;
+  // Polar → cartesian.  i=0 (B02) at top; rotate clockwise.
+  const pt = (i, val) => {
+    const t = (i / N) * 2 * Math.PI - Math.PI / 2;
+    const r = Math.min(Math.max(val, 0), SPECTRUM_RMAX) / SPECTRUM_RMAX * R;
+    return [cx + Math.cos(t) * r, cy + Math.sin(t) * r];
+  };
+  const polyPath = (vals) => {
+    const pts = vals.map((v, i) => pt(i, v));
+    return 'M' + pts.map(p => p.join(',')).join('L') + 'Z';
+  };
+  // Grid rings at 0.1, 0.25, 0.5 (i.e. r = 0.2, 0.5, 1.0 of R)
+  const ringR = [0.2, 0.5, 1.0].map(f => R * f);
+  // Axis labels at radius R+12 — place at the band's angle.
+  const labelPts = SPECTRUM_BANDS.map((b, i) => {
+    const t = (i / N) * 2 * Math.PI - Math.PI / 2;
+    return [cx + Math.cos(t) * (R + 14), cy + Math.sin(t) * (R + 14), b];
+  });
+  return `
+    <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      ${ringR.map(r => `<circle class="t-spectrum-grid" cx="${cx}" cy="${cy}" r="${r}"/>`).join('')}
+      ${SPECTRUM_BANDS.map((_, i) => {
+        const [x, y] = pt(i, SPECTRUM_RMAX);
+        return `<line class="t-spectrum-axis" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}"/>`;
+      }).join('')}
+      <path class="t-spectrum-pre"  d="${polyPath(meanPre)}"/>
+      <path class="t-spectrum-post" d="${polyPath(meanPost)}"/>
+      ${labelPts.map(([x, y, b]) =>
+        `<text class="t-spectrum-label" x="${x}" y="${y}">${b}</text>`).join('')}
+    </svg>
+    <div class="t-spectrum-legend">
+      <span><span class="sw" style="background:#8caf82;"></span>pre</span>
+      <span><span class="sw" style="background:#c76340;"></span>post</span>
+      <span style="margin-left:auto;color:var(--muted);">Δρ in 10 S2 bands</span>
+    </div>`;
+}
+
 /* ═════════════ Hover tooltip ═════════════ */
 function setupHover() {
   const tt = document.getElementById('tooltip');
@@ -1716,10 +1780,24 @@ function openTileView() {
     zoom: 13.2,
     points: window._points,
     visible: window._passes,
-    // No hover tooltip in the tile view — hex density makes the tooltip
-    // flicker through every pixel move, which is more noise than signal.
-    // Click-to-inspect still works for specific hexes (see onClick).
-    onHover: null,
+    // Spectrum-archetype tooltip: hover shows the dominant cluster's
+    // mean pre/post 10-band reflectance as overlaid radar polygons.
+    // Cluster_meta is already loaded so this is a zero-fetch lookup.
+    onHover: (p, e) => {
+      if (!p || p.cluster_id == null) { tt.style.visibility = 'hidden'; return; }
+      const cmeta = CLUSTER_META && CLUSTER_META.clusters &&
+        CLUSTER_META.clusters[p.cluster_id];
+      if (!cmeta) { tt.style.visibility = 'hidden'; return; }
+      const tagLabel = cmeta.tag === 'deforest' ? 'deforest' : cmeta.tag;
+      tt.innerHTML = `
+        <div class="t-head">cluster c${cmeta.id} · ${tagLabel}</div>
+        <div class="t-meta">mag ${cmeta.mag.toFixed(3)} &nbsp; slope ${cmeta.slope_med != null ? cmeta.slope_med.toFixed(1) + '°' : '—'}</div>
+        <div class="t-meta">peak ${cmeta.year_peak} &nbsp; n ${cmeta.n.toLocaleString()}</div>
+        <div class="t-spectrum">${spectrumSVG(cmeta.mean_pre, cmeta.mean_post)}</div>`;
+      tt.style.left = Math.min(window.innerWidth - 220, e.clientX + 16) + 'px';
+      tt.style.top  = Math.min(window.innerHeight - 280, e.clientY + 16) + 'px';
+      tt.style.visibility = 'visible';
+    },
     onClick: (p, e) => {
       const ins = document.getElementById('inspector');
       if (!p) { ins.style.visibility = 'hidden'; return; }
