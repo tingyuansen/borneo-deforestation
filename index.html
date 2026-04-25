@@ -351,6 +351,8 @@
     display: inline-block; width: 7px; height: 7px; border-radius: 50%;
     margin: 0 3px 0 6px; vertical-align: middle;
   }
+  #spectrum-panel .sp-caption { color: var(--muted); font-size: 9px;
+    margin-top: 4px; letter-spacing: 0.06em; }
 
   /* Inspector (pinned on click) */
   #inspector {
@@ -872,11 +874,15 @@
 
 <!-- Spectrum panel — compact clock-style widget at top-right.  Radar
      scaffold is always drawn; pre/post polygons swap as cursor crosses
-     dots in per-pixel view.  Caption is a static descriptor — the
-     panel is showing what the data SOURCE is, not the per-cluster id. -->
+     dots in per-pixel view.  Caption is a static descriptor + a small
+     pre/post colour legend so the user knows which polygon is which. -->
 <div id="spectrum-panel">
   <div id="sp-svg"></div>
-  <div class="sp-line">photometric measurement<br/>from Sentinel-2</div>
+  <div class="sp-line">
+    <span class="sw" style="background:#8caf82;"></span>pre
+    <span class="sw" style="background:#c76340;"></span>post
+  </div>
+  <div class="sp-line sp-caption">photometric measurement<br/>from Sentinel-2</div>
 </div>
 <div id="inspector">
   <div class="ins-head">
