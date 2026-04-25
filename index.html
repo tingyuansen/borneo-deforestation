@@ -785,11 +785,6 @@
     <span class="lbl">Moderate / gradual</span>
     <span class="count" id="ct-moderate"></span>
   </div>
-  <div class="cat-chip deforest" data-group="suspect">
-    <span class="sw" style="background:#e8d9b8;"></span>
-    <span class="lbl">Suspect (topo / weak)</span>
-    <span class="count" id="ct-suspect"></span>
-  </div>
   <div class="viewport-panel">
     <div class="vp-label">In view</div>
     <div class="vp-value" id="vp-ha">—</div>
@@ -995,24 +990,23 @@ function buildPoints() {
     || new Set();
   const hiddenGroups   = (window._state && window._state.hiddenGroups)
     || new Set();
+  // Sarawak-clip + topo-clip + tag-clip applied once.  v1-era OCEAN /
+  // MOUNTAIN / elev_m / mixed filters all replaced by:
+  //   - inSarawak() polygon clip (drops Brunei/Sabah/Kalimantan)
+  //   - cluster.topo_flag (drops ridge-line illumination artefacts)
+  //   - tag === 'deforest' (the only tag that paints on the globe)
+  const _isInSarawak = window.inSarawak || (() => true);
+  const _meta = (CLUSTER_META && CLUSTER_META.clusters) || [];
+  const _byId = Object.fromEntries(_meta.map(c => [c.id, c]));
   const visible = [];
   for (const h of hexSource) {
     if ((h.n || 0) === 0) continue;
-    if (OCEAN_CLUSTERS.has(h.cluster_id)) continue;
-    if (h.elev_m != null && h.elev_m < 3) continue;
-    if (h.tag === 'mixed') continue;
+    if (h.tag !== 'deforest') continue;
+    const cmeta = _byId[h.cluster_id];
+    if (!cmeta || cmeta.topo_flag) continue;
+    if (!_isInSarawak(h.lon, h.lat)) continue;
     if (hiddenClusters.has(h.cluster_id)) continue;   // chip toggle
-    const isMountain = MOUNTAIN_CLUSTERS.has(h.cluster_id);
-    if (isMountain && hiddenGroups.has('suspect')) continue;
-    // Regrowth hexes dropped entirely — c3/c13 centroids are mostly
-    // coastal and the remaining inland slice is too sparse to carry
-    // a meaningful signal on the globe layer.
-    const cohort =
-        h.tag === 'deforest' && isMountain ? 'flagged'
-      : h.tag === 'deforest'               ? 'deforest'
-      :                                      null;
-    if (!cohort) continue;
-    h._cohort = cohort;
+    h._cohort = 'deforest';
     visible.push(h);
   }
   // Rank density colour only across the real-deforest cohort so the
@@ -1040,6 +1034,11 @@ function buildPoints() {
       bucket: 'sarawak',
       layer: 'hex',
       h3: h.h3, y: h.y, n: h.n, _rankT: t,
+      // Carry deforest_n so the tile-view's coarse-zoom (zoom < 10)
+      // viewport hist sums true deforest pixels rather than h.n (total,
+      // which folds in mixed + outliers and inflates the "In view"
+      // hectare readout).
+      deforest_n: h.deforest_n,
       tag: h.tag,
       cluster_id: h.cluster_id,
       cohort,
@@ -1066,20 +1065,20 @@ function boot() {
   // DATA pilot array and the stat-card DOM — both commented out in Phase 1,
   // so nothing to update here. Restored when cluster labels are applied.
 
-  // Chip groups — each one toggles a set of cluster IDs on/off. Groups
-  // are assigned by cluster rank within the visible-deforest cohort
-  // (biggest spectral regime first). Mountain-suspect and mixed-tag
-  // hexes fall into 'suspect' (pale yellow in the hex layer).
+  // Chip groups — each one toggles a set of cluster IDs on/off.
+  // Three chips by SPECTRAL MAGNITUDE within the non-topo deforest set.
+  // Topo-flagged clusters (median slope > 10° = ridge-line illumination
+  // drift the C-correction can't fully remove on >15° terrain) are
+  // dropped entirely — they were the bulk of the v1 "Suspect" chip and
+  // also leaked into severe/heavy when ranked by count.  Mountain
+  // (v1 hardcoded) and Ocean lists are no longer applied — slope_med
+  // and tag together do the right thing data-driven.
   const _def = CLUSTER_META.clusters
-    .filter(c => c.tag === 'deforest'
-      && !OCEAN_CLUSTERS.has(c.id)
-      && !MOUNTAIN_CLUSTERS.has(c.id))
-    .sort((a, b) => b.n - a.n);
+    .filter(c => c.tag === 'deforest' && !c.topo_flag);
   const GROUPS = {
-    severe:   _def.slice(0, 1).map(c => c.id),      // biggest cluster
-    heavy:    _def.slice(1, 2).map(c => c.id),      // 2nd
-    moderate: _def.slice(2).map(c => c.id),         // rest
-    suspect:  [...MOUNTAIN_CLUSTERS],
+    severe:   _def.filter(c => c.mag >= 0.18).map(c => c.id),                       // c12, c13, c15
+    heavy:    _def.filter(c => c.mag >= 0.16 && c.mag < 0.18).map(c => c.id),       // c2, c14
+    moderate: _def.filter(c => c.mag <  0.16).map(c => c.id),                       // c1, c3, c4
   };
   const GROUP_OF = {};
   for (const [g, ids] of Object.entries(GROUPS)) {
@@ -1125,13 +1124,25 @@ function boot() {
     ha >= 1_000     ? (ha / 1_000).toFixed(ha >= 10_000 ? 0 : 1) + 'k ha' :
                       ha.toFixed(0) + ' ha';
   window._fmtHa = fmtHa;
+  // Chip totals computed from the Sarawak-clipped coarse hex data, NOT
+  // from CLUSTER_META.clusters[id].n directly — cluster.n includes
+  // Brunei/Sabah/Kalimantan pixels that the bbox spills into. Aggregating
+  // over inSarawak hexes drops those, so chip totals reconcile with the
+  // "In view" hectare readout at full zoom-out.
   function refreshChipCounts() {
-    if (!CLUSTER_META || !CLUSTER_META.clusters) return;
-    const byId = Object.fromEntries(CLUSTER_META.clusters.map(c => [c.id, c]));
-    for (const g of Object.keys(GROUPS)) {
-      const n = GROUPS[g].reduce((s, id) => s + (byId[id]?.n || 0), 0);
+    const isInSarawak = window.inSarawak || (() => true);
+    const totals = {};
+    for (const g of Object.keys(GROUPS)) totals[g] = 0;
+    for (const h of (SARAWAK_HEXES_COARSE || [])) {
+      if (h.tag !== 'deforest') continue;
+      if (!isInSarawak(h.lon, h.lat)) continue;
+      const grp = GROUP_OF[h.cluster_id];
+      if (!grp || !(grp in totals)) continue;
+      totals[grp] += h.deforest_n || 0;
+    }
+    for (const g of Object.keys(totals)) {
       const el = document.getElementById(`ct-${g}`);
-      if (el) el.textContent = fmtHa(n * 0.01);
+      if (el) el.textContent = fmtHa(totals[g] * 0.01);
     }
   }
   refreshChipCounts();
@@ -1153,9 +1164,6 @@ function boot() {
   function passes(p) {
     if (p.layer === 'hex') {
       if (p.cluster_id != null && hiddenClusters.has(p.cluster_id)) return false;
-      // Special case: 'flagged' cohort (pale yellow) is gated by the
-      // 'suspect' chip, not by its cluster id directly.
-      if (p.cohort === 'flagged' && hiddenGroups.has('suspect')) return false;
       if (p.y != null && (p.y < state.yearRange[0] || p.y > state.yearRange[1])) return false;
       return true;
     }
@@ -1229,15 +1237,16 @@ function drawHistogram() {
   if (!CLUSTER_META || !CLUSTER_META.clusters) return;
 
   const YEAR_LO = 2015, YEAR_HI = 2024;
-  // Stack layers mirror the four chips: severe / heavy / moderate / suspect.
+  // Stack layers mirror the three chips: severe / heavy / moderate.
   // Each chip maps to a fixed set of clusters (window._GROUPS), and the
   // swatch colors come from the chip DOM so stack === chip exactly.
-  const TAGS = ['severe', 'heavy', 'moderate', 'suspect'];
+  // Suspect chip removed — topo-flagged clusters (where the v1 Suspect
+  // chip lived) are dropped at the data filter, not toggled.
+  const TAGS = ['severe', 'heavy', 'moderate'];
   const TAG_COLOR = {
     severe:   '#c65438',
     heavy:    '#d46d45',
     moderate: '#e7b27e',
-    suspect:  '#e8d9b8',       // PALE_YELLOW
   };
   // Precompute cluster_id → group lookup once so both the global + viewport
   // aggregators can route a cluster's count into the right stack layer.
@@ -1254,21 +1263,26 @@ function drawHistogram() {
   // aggregate would rescale the whole chart each time the user toggled
   // a chip, which reads as "the chart jumps/fattens/shrinks on toggle".
   // Chip-state application happens at paint time in renderBars.
+  // Aggregated from Sarawak-clipped coarse hex data, NOT from
+  // CLUSTER_META.clusters[].year_hist directly — that would include
+  // Brunei/Sabah/Kalimantan and the histogram totals wouldn't match
+  // the chip strip at full zoom-out. Trade-off: per-hex `y` is the
+  // hex-median year (coarser temporal resolution than the per-cluster
+  // year_hist would have provided), but the totals reconcile.
   function globalYT() {
     const yt = {};
     for (let y = YEAR_LO; y <= YEAR_HI; y++) {
       yt[y] = {};
       for (const k of TAGS) yt[y][k] = 0;
     }
-    for (const c of CLUSTER_META.clusters) {
-      if (c.tag !== 'deforest') continue;
-      if (OCEAN_CLUSTERS.has(c.id)) continue;
-      const group = GROUP_OF[c.id];
-      if (!group) continue;
-      for (const [ys, n] of Object.entries(c.year_hist || {})) {
-        const yy = +ys;
-        if (yt[yy] != null) yt[yy][group] += n;
-      }
+    const isInSarawak = window.inSarawak || (() => true);
+    for (const h of (SARAWAK_HEXES_COARSE || [])) {
+      if (h.tag !== 'deforest') continue;
+      if (!isInSarawak(h.lon, h.lat)) continue;
+      const grp = GROUP_OF[h.cluster_id];
+      if (!grp || !(grp in yt[YEAR_LO])) continue;
+      const yy = h.y;
+      if (yt[yy] != null) yt[yy][grp] = (yt[yy][grp] || 0) + (h.deforest_n || 0);
     }
     return yt;
   }

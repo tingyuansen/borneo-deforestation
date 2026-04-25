@@ -85,6 +85,27 @@
   const TILE_GRID_ROWS  = 42;
   const TILE_LON_MIN    = 109.5;
   const TILE_LAT_MIN    =   0.8;
+  // Sarawak boundary (lon, lat). GADM v4.1 admin-1 mainland polygon,
+  // Douglas-Peucker simplified to ~4 km coast resolution (162 vertices,
+  // ~3 KB). Used by inSarawak() to clip the empty-hex backdrop so it
+  // stays on land. The 15-vertex approximation it replaced clipped
+  // legitimate inland hexes and missed parts of the sea.
+  const SARAWAK_OUTLINE = [[110.2611,1.0528],[110.1892,1.1785],[110.0413,1.2047],[110.0615,1.2591],[109.9786,1.2986],[109.9592,1.3943],[109.8304,1.4244],[109.8363,1.4824],[109.6607,1.6193],[109.6829,1.785],[109.5846,1.791],[109.5397,1.9049],[109.6467,2.0577],[109.6817,1.8608],[109.925,1.7006],[109.8431,1.6059],[109.8888,1.6977],[109.9759,1.6938],[109.9342,1.637],[110.0067,1.6981],[110.1444,1.6564],[110.195,1.7069],[110.3184,1.5932],[110.3292,1.7133],[110.4066,1.5781],[110.275,1.5181],[110.4006,1.5751],[110.3855,1.4803],[110.435,1.5769],[110.5239,1.3928],[110.4903,1.5644],[110.596,1.6015],[110.7314,1.5464],[110.7392,1.4819],[110.6428,1.4239],[110.7442,1.3942],[110.6611,1.3703],[110.7237,1.3028],[110.6878,1.2464],[110.7264,1.3014],[110.6675,1.3711],[110.7483,1.3964],[110.6489,1.4228],[110.7525,1.4731],[110.7881,1.5786],[111.3183,1.3248],[111.2949,1.4001],[111.0663,1.4456],[110.9944,1.5722],[111.0467,1.6808],[111.2831,1.6211],[111.1669,1.6417],[111.0862,1.7566],[111.1885,2.0346],[111.2458,2.0342],[111.21,2.0957],[111.3195,2.0206],[111.3547,2.1347],[111.4139,2.0933],[111.3574,2.155],[111.5483,2.1502],[111.3811,2.1502],[111.5042,2.212],[111.3545,2.2042],[111.2946,2.3038],[111.4606,2.2586],[111.3425,2.2647],[111.3089,2.3247],[111.3275,2.3702],[111.3361,2.3281],[111.4928,2.3436],[111.3961,2.4917],[111.6026,2.4486],[111.3975,2.5317],[111.4339,2.7022],[111.635,2.8494],[111.7404,2.7963],[111.6853,2.8416],[111.8733,2.8761],[111.9044,2.7995],[111.8856,2.8736],[112.5861,3.0035],[113.0064,3.1601],[113.4339,3.7564],[113.6939,3.9553],[113.924,4.2485],[113.9971,4.4433],[113.977,4.5977],[114.2372,4.5295],[114.3178,4.2759],[114.4477,4.2853],[114.6485,4.0249],[114.8145,4.1559],[114.8866,4.3741],[114.7948,4.7464],[115.0214,4.8909],[115.1141,4.3989],[115.3459,4.3133],[115.2481,4.811],[115.1553,4.9112],[115.1974,4.965],[115.322,4.8935],[115.4331,4.9817],[115.6306,4.9924],[115.6648,4.7907],[115.5598,4.6093],[115.6004,4.3754],[115.6797,4.3178],[115.6459,4.189],[115.6901,4.1245],[115.6562,3.9876],[115.5714,3.9267],[115.6282,3.8644],[115.5712,3.6799],[115.657,3.4394],[115.5873,3.4493],[115.5459,3.3682],[115.5155,3.2227],[115.5642,3.1614],[115.4982,3.0294],[115.3317,2.9752],[115.2884,3.0354],[115.0934,2.8211],[115.1552,2.7907],[115.0977,2.6127],[115.1772,2.6106],[115.2421,2.4986],[114.7387,2.1903],[114.7365,2.1338],[114.8186,2.1277],[114.8078,2.0241],[114.8869,2.0244],[114.8826,1.9158],[114.7223,1.8568],[114.7087,1.638],[114.6115,1.575],[114.5661,1.4263],[114.4059,1.5127],[114.2099,1.4107],[113.9788,1.4529],[113.6368,1.2177],[113.5417,1.3196],[113.424,1.2834],[113.1002,1.4393],[112.9735,1.4081],[113.0618,1.5308],[113.0251,1.565],[112.4861,1.5761],[112.2087,1.4493],[112.1524,1.152],[111.9455,1.1217],[111.8617,1.003],[111.6686,1.0467],[111.5352,0.9606],[111.4807,1.0355],[111.2296,1.085],[110.9045,1.025],[110.8012,0.944],[110.8083,0.8595],[110.7729,0.9321],[110.5768,0.8537],[110.2611,1.0528]];
+  const inSarawak = (lon, lat) => {
+    let inside = false;
+    for (let i = 0, j = SARAWAK_OUTLINE.length - 1; i < SARAWAK_OUTLINE.length; j = i++) {
+      const [xi, yi] = SARAWAK_OUTLINE[i];
+      const [xj, yj] = SARAWAK_OUTLINE[j];
+      if (((yi > lat) !== (yj > lat)) &&
+          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  // Expose globally so index.html (chip totals) and globe.js can use the
+  // same Sarawak clip as tile-view's hex render — we want Sarawak-only
+  // numbers everywhere (the bbox spills into Brunei/Sabah/Kalimantan).
+  window.inSarawak = inSarawak;
+  window.SARAWAK_OUTLINE = SARAWAK_OUTLINE;
   // Zoom threshold: at zoom < this we render the hex aggregate; at ≥ this
   // we render per-pixel dots from .bin tiles. Set to 13 so any nontrivial
   // zoom-out from the fly-in (which opens at zoom 13.2) flips back to the
@@ -170,7 +191,12 @@
   //                         which is exact for the total.
   const HIST_PIXEL_SWITCH = 12;   // mirror PIXEL_SWITCH in _draw()
   const HIST_HEX_FINE_SWITCH = 10;
-  const HIST_HIDDEN = new Set([2, 3, 11, 12, 13, 15, 16]);
+  // Align HIST_HIDDEN with the chip-strip's exclusion set (ocean
+  // clusters only). The previous list (added c3 + c13) was a v1-era
+  // carryover that excluded ~600k ha from the in-view aggregation
+  // while leaving them in the chip totals — the visible "chips don't
+  // sum to In view" mismatch at zoom-out came from that desync.
+  const HIST_HIDDEN = new Set([2, 11, 12, 15, 16]);   // = OCEAN_CLUSTERS
   const HIST_SUSPECT = new Set([1, 4, 8, 9, 14, 18]);
   function buildViewportYearHist() {
     const CM = window.CLUSTER_META;
@@ -207,35 +233,51 @@
       const fine = window.SARAWAK_HEXES_FINE;
       const useFine = zoom >= HIST_HEX_FINE_SWITCH && fine && fine.length;
       const OCEAN_HEX = new Set([2, 11, 12, 15, 16]);
+      // Coarse-zoom path reads SARAWAK_HEXES_COARSE directly (not the
+      // globe builder's `points`) so the in-view total uses the same
+      // exclusion set as the chip strip — ocean clusters only. The
+      // globe `points` array strips additional hexes for VISUAL reasons
+      // (mixed-tag, elev<3, etc.) that legitimately contain deforest
+      // pixels — using that as the count source under-reports by ~20%
+      // at full zoom-out.
+      // Include BOTH deforest- and mixed-tag hexes, Sarawak-only.
+      // The bbox spills into Brunei/Sabah/Kalimantan — those should
+      // not contribute to the "In view" hectare readout.
       let src;
       if (useFine) {
         src = [];
         for (const h of fine) {
-          if (h.tag !== 'deforest') continue;
-          if (OCEAN_HEX.has(h.cluster_id)) continue;
-          if (h.elev_m != null && h.elev_m < 3) continue;
+          if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
+          if (!inSarawak(h.lon, h.lat)) continue;
           src.push(h);
         }
       } else {
-        src = points;
+        const coarse = window.SARAWAK_HEXES_COARSE || [];
+        src = [];
+        for (const h of coarse) {
+          if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
+          if (!inSarawak(h.lon, h.lat)) continue;
+          src.push(h);
+        }
       }
       for (let i = 0; i < src.length; i++) {
         const h = src[i];
         if (h.lon < lon0 || h.lon > lon1) continue;
         if (h.lat < lat0 || h.lat > lat1) continue;
-        const cid = h.cluster_id;
-        if (cid == null || !keepCid(cid)) continue;
         if (splitPx > 0) {
           const sx = lon2x(h.lon, zoom) - cx + halfW;
           if (sx < splitPx) continue;
         }
         const year = h.y;
         if (hist[year] == null) continue;
-        // `points` carries h.n from the globe builder (total, but hex
-        // is deforest-dominant so ≈ deforest_n); raw fine hexes have
-        // deforest_n separately — prefer it when present for accuracy.
         const nDef = h.deforest_n != null ? h.deforest_n : h.n;
-        const key = 'c' + cid;
+        if (!nDef) continue;
+        // For deforest-tag hexes, attribute to the dominant cluster's
+        // chip via 'c<cid>' key (downstream buildBinData maps it via
+        // GROUP_OF). For mixed-tag hexes the dominant cluster isn't in
+        // any chip, so attribute directly to 'moderate' — these are
+        // deforest-direction pixels just below the dominant-tag bar.
+        const key = (h.tag === 'mixed') ? 'moderate' : ('c' + h.cluster_id);
         hist[year][key] = (hist[year][key] || 0) + nDef;
       }
       return hist;
@@ -573,6 +615,7 @@
           if (yr[i] < yrLoRel || yr[i] > yrHiRel) continue;
           const lon = lonMin + dx[i] * tileInvScale;
           const lat = latMin + dy[i] * tileInvScale;
+          if (!inSarawak(lon, lat)) continue;     // Sarawak-only clip
           const sx = lon2x(lon, zoom) - cx + halfW;
           const sy = lat2y(lat, zoom) - cy + halfH;
           if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
@@ -597,29 +640,28 @@
       let hexSource;
       let rankFn;
       if (useFine && fine && fine.length) {
-        const OCEAN    = new Set([2, 11, 12, 15, 16]);
-        const MOUNTAIN = new Set([1, 4, 8, 9, 14, 18]);
-        // Match buildPoints' land-only deforest filter so the coarse and
-        // fine hex layers show the same set of hexes — no ocean blanket
-        // at the coast when the user zooms in. `tag === 'empty'` hexes
-        // (added by the pipeline's full-grid backdrop pass) are kept
-        // too; the colored pass below filters them out so they only
-        // show as pale-yellow footprints.
-        const keptFine = fine.filter(h =>
-          (h.tag === 'deforest' || h.tag === 'empty')
-          && !OCEAN.has(h.cluster_id)
-          && (h.elev_m == null || h.elev_m >= 3)
-        );
-        const sorted = [...keptFine].sort((a, b) => a.n - b.n);
-        const rankOf = new Map();
-        const denom = Math.max(1, sorted.length - 1);
-        for (let i = 0; i < sorted.length; i++) rankOf.set(sorted[i], i / denom);
-        hexSource = keptFine;
-        rankFn = (h) => rankOf.get(h);
+        // Sarawak-only clip applied to all tags (the scan bbox spills
+        // into Brunei, Sabah, and Indonesian Kalimantan — those need
+        // to be excluded from both display and counting).  v1-era
+        // OCEAN_CLUSTERS + elev_m filters dropped (wrong for v3).
+        hexSource = fine.filter(h => {
+          if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
+          return inSarawak(h.lon, h.lat);
+        });
+        // Rank is computed per-frame against the viewport-visible subset
+        // (see hexPolys block below), so the colour ramp re-spans 0-1 at
+        // every zoom. The previous global rank made every visible hex
+        // peg at the deep-red end whenever the viewport was a dense
+        // sub-region of the full ~30K hex set.
+        rankFn = null;   // placeholder — assigned after hexPolys is built
       } else {
-        // `points` is already filtered to deforest + carries _rankT.
-        hexSource = points;
-        rankFn = (p) => (p._rankT ?? 0.5);
+        // Coarse zoom — Sarawak-only clip on every tag, same as fine.
+        const coarse = window.SARAWAK_HEXES_COARSE || [];
+        hexSource = coarse.filter(h => {
+          if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
+          return inSarawak(h.lon, h.lat);
+        });
+        rankFn = null;   // viewport-relative rank assigned below
       }
       const hexDensityColor = window.hexDensityColor || ((t) => '#c67b2f');
       const yr0 = (window._state && window._state.yearRange && window._state.yearRange[0]) || 2015;
@@ -646,25 +688,39 @@
         }
         hexPolys.push({ p, poly });
       }
+      // If using the fine source (rankFn === null), rank ONLY the
+      // colored deforest hexes that are in-viewport. The empty backdrop
+      // hexes don't enter the ranking — they only paint as the pale fill.
+      if (rankFn === null) {
+        const colored = hexPolys
+          .filter(({ p }) => p.tag === 'deforest')
+          .map(({ p }) => p);
+        const sorted = colored.slice().sort((a, b) => (a.n||0) - (b.n||0));
+        const rankOf = new Map();
+        const denom = Math.max(1, sorted.length - 1);
+        for (let i = 0; i < sorted.length; i++) rankOf.set(sorted[i], i / denom);
+        rankFn = (p) => rankOf.get(p) ?? 0;
+      }
       const drawPoly = (poly) => {
         ctx.beginPath();
         ctx.moveTo(poly[0][0], poly[0][1]);
         for (let j = 1; j < poly.length; j++) ctx.lineTo(poly[j][0], poly[j][1]);
         ctx.closePath();
       };
-      // Pass 1 — pale-yellow backdrop (no year filter).
+      // Pass 1 — pale-yellow backdrop for every land hex (empty / mixed
+      // / deforest). Solid fill at 0.35 alpha — strong enough to read
+      // as continuous land coverage so inland gaps look like "scan
+      // covered, no detection here" instead of "missing data". No
+      // stroke (the previous 0.32-stroke version made the grid pop
+      // visually and competed with the deforest paint).
       ctx.fillStyle = BACKDROP_COLOR;
-      ctx.strokeStyle = BACKDROP_COLOR;
-      ctx.lineWidth = 0.5;
-      ctx.globalAlpha = 0.18;
+      ctx.globalAlpha = 0.35;
       for (const { poly } of hexPolys) { drawPoly(poly); ctx.fill(); }
-      ctx.globalAlpha = 0.32;
-      for (const { poly } of hexPolys) { drawPoly(poly); ctx.stroke(); }
       ctx.globalAlpha = 1;
-      // Pass 2 — year-filtered colored paint on top. Skip 'empty' hexes
-      // (backdrop-only) and year-out-of-range hexes.
+      // Pass 2 — year-filtered coloured paint on top. Skip
+      // backdrop-only hexes (empty / mixed) and year-out-of-range hexes.
       for (const { p, poly } of hexPolys) {
-        if (p.tag === 'empty') continue;
+        if (p.tag === 'empty' || p.tag === 'mixed') continue;
         if (p.y != null && (p.y < yr0 || p.y > yr1)) continue;
         const t = rankFn(p);
         const color = p.color || hexDensityColor(t);
