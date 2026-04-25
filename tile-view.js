@@ -137,19 +137,15 @@
   // points and the tab freezes.
   const LOD_ZOOM_SWITCH = 13;
   const BIN_MAX_CACHE   = 48;                   // LRU budget (~48 × ~1 MB)
-  // Split the serving paths: GitHub Pages returns the raw LFS pointer
-  // text for .bin files (Pages doesn't resolve LFS), so the live site
-  // fetches binaries from media.githubusercontent.com/media/... which
-  // DOES resolve LFS and ships CORS. manifest.json stays on Pages — it's
-  // not LFS-tracked, and media URLs return 404 for non-LFS files.
-  const MEDIA_BASE = 'https://media.githubusercontent.com/media/tingyuansen/borneo-deforestation/main/data/tiles/2of3/';
-  const LOCAL_BASE = 'data/tiles/2of3/';
-  const IS_PAGES_HOST = (() => {
-    const h = (typeof location !== 'undefined' && location.hostname) || '';
-    return h === 'tingyuansen.github.io' || /\.github\.io$/.test(h);
-  })();
-  const MANIFEST_URL = LOCAL_BASE + 'manifest.json';          // always Pages / local
-  const BIN_BASE     = IS_PAGES_HOST ? MEDIA_BASE : LOCAL_BASE;
+  // .bin tiles served from the same public GCS bucket as the rest of
+  // the data layer (see DATA_BASE in index.html).  Replaces the previous
+  // GitHub LFS path (media.githubusercontent.com/media/...) which had
+  // wildly variable TTFB and was the main source of "blank tiles look
+  // like no data here" complaints.
+  const DATA_BASE = (typeof window !== 'undefined' && window.DATA_BASE)
+    || 'https://storage.googleapis.com/borneo-deforestation-data/data/';
+  const BIN_BASE     = DATA_BASE + 'tiles/2of3/';
+  const MANIFEST_URL = BIN_BASE + 'manifest.json';
   let   binManifest     = null;                 // { tiles: { iy_ix: {...} } }
   const binCache        = new Map();            // key → { dx, dy, yr, n, lonMin, latMin }
   const binFetching     = new Set();

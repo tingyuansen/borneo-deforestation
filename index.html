@@ -1068,7 +1068,21 @@ function hexDensityColor(t) {       // t ∈ [0,1]
 window.hexDensityColor = hexDensityColor;
 
 /* ═════════════ Load data ═════════════ */
-const P = name => `data/${name}`;
+// Data routing — production fetches from a public GCS bucket (Google's
+// CDN, ~170× faster than GitHub Pages on the heavier files), local dev
+// reads from the on-disk `data/` folder so the workflow doesn't need
+// network for iteration.  Locally hosted on `python -m http.server`
+// (localhost / 127.0.0.1) or `file://` falls through to local; anything
+// else (the live tingyuansen.github.io site) uses GCS.
+{
+  const h = window.location.hostname;
+  const isLocal = (h === 'localhost' || h === '127.0.0.1' ||
+                   window.location.protocol === 'file:');
+  window.DATA_BASE = isLocal
+    ? 'data/'
+    : 'https://storage.googleapis.com/borneo-deforestation-data/data/';
+}
+const P = name => window.DATA_BASE + name;
 let MANIFEST;
 let globe;
 

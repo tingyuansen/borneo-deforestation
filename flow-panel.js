@@ -354,7 +354,10 @@ window.FlowPanel = (() => {
       attachOrbit(canvas);
       new ResizeObserver(fitToCanvas).observe(canvas);
       // Pull chip_summary from the JSON the standalone PCA page also uses.
-      fetch('data/pca_flow_sample.json?v=' + Date.now())
+      // Pull from the public GCS bucket (same as index.html / tile-view).
+      // Cache-bust kept so a republished sample doesn't get stuck behind
+      // the bucket's max-age=86400.
+      fetch((window.DATA_BASE || 'data/') + 'pca_flow_sample.json?v=' + Date.now())
         .then(r => r.json())
         .then(j => {
           summary = j.chip_summary || null;
