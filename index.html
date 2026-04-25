@@ -1820,20 +1820,27 @@ function openTileView() {
     zoom: 13.2,
     points: window._points,
     visible: window._passes,
-    // Spectrum panel update on hover.  Only meaningful in the per-pixel
-    // (symbol) view: at hex zoom the picked hex carries a *dominant*
-    // cluster_id but the area covers many clusters, so showing one
-    // archetype is misleading.  Radar scaffold stays visible always —
-    // only the polygons swap in/out as the cursor crosses dots.
+    // Spectrum panel update on hover.  Per-pixel view only — at hex
+    // zoom the panel hides entirely (showing the radar with no polygon
+    // would be confusing since hex visuals already encode density).
+    // Polygon swaps in/out as cursor crosses dots; radar scaffold
+    // stays put when the cursor is over empty area.
     onHover: (p, e) => {
       const PIXEL_ZOOM = 12;
       const z = (window.TileView && window.TileView.getZoom) ? window.TileView.getZoom() : 0;
-      if (z < PIXEL_ZOOM) { showSpectrumPanel(null); return; }   // hex view → empty radar
+      if (z < PIXEL_ZOOM) { hideSpectrumPanel(); return; }
       if (!p || p.cluster_id == null) { showSpectrumPanel(null); return; }
       const cmeta = CLUSTER_META && CLUSTER_META.clusters &&
         CLUSTER_META.clusters[p.cluster_id];
       if (!cmeta) { showSpectrumPanel(null); return; }
       showSpectrumPanel(cmeta);
+    },
+    // Toggle panel visibility on zoom change so the user doesn't need
+    // to wiggle the mouse to update visibility after zooming in/out.
+    onZoom: (z) => {
+      if (z < 12) hideSpectrumPanel();
+      else if (!document.getElementById('spectrum-panel').classList.contains('visible'))
+        showSpectrumPanel(null);
     },
     onClick: (p, e) => {
       const ins = document.getElementById('inspector');
@@ -1851,7 +1858,9 @@ function openTileView() {
     },
   });
   document.body.classList.add('in-tile-view');
-  showSpectrumPanel(null);   // panel visible with default "hover to inspect" state
+  // Initial spectrum-panel state — show only if we open at per-pixel zoom.
+  const z0 = (window.TileView && window.TileView.getZoom) ? window.TileView.getZoom() : 13;
+  if (z0 >= 12) showSpectrumPanel(null); else hideSpectrumPanel();
   // Lazy-build the analysis panels the first time the tile view opens.
   if (!openTileView._built) {
     openTileView._built = true;

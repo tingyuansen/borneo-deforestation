@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sarawak deforestation · PC1-3 flow</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,500;1,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  :root { --paper:#f4ede1; --rule:rgba(244,237,225,0.10); --muted:rgba(244,237,225,0.55); --ochre:#e7c798; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0806; color: var(--paper);
+               font-family: 'Inter', sans-serif; overflow: hidden; }
+  #scene { position: fixed; inset: 0; }
+  /* ── Title plate (top-left) ──────────────────────────────── */
+  #title {
+    position: fixed; top: 24px; left: 28px; max-width: 380px; z-index: 10;
+    pointer-events: none;
+  }
+  #title .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.22em; text-transform: uppercase; color: var(--ochre);
+  }
+  #title h1 {
+    font-family: 'Fraunces', serif; font-weight: 300; font-style: italic;
+    font-size: 28px; letter-spacing: -0.01em; line-height: 1.18;
+    margin: 6px 0 8px; color: var(--paper);
+  }
+  #title h1 em { color: #e7b984; font-style: italic; font-weight: 300; }
+  #title p {
+    font-family: 'Inter', sans-serif; font-size: 12.5px; line-height: 1.55;
+    color: #cfbe98; margin: 0;
+  }
+  /* ── Right rail (controls + legend) ──────────────────────── */
+  #rail {
+    position: fixed; top: 24px; right: 24px; z-index: 10;
+    width: 220px; padding: 12px 14px;
+    background: rgba(12,9,6,0.82); border: 1px solid var(--rule);
+    backdrop-filter: blur(8px);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98;
+  }
+  #rail h3 { margin: 0 0 8px; font-family: 'Fraunces', serif;
+             font-style: italic; font-size: 14px; color: var(--paper);
+             font-weight: 400; }
+  #rail .row { display: flex; justify-content: space-between; align-items: center;
+               padding: 4px 0; border-top: 1px dashed var(--rule); }
+  #rail .row:first-of-type { border-top: 0; }
+  #rail .sw { display: inline-block; width: 9px; height: 9px;
+              border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  #rail .axis-evr { color: var(--muted); font-size: 10px; letter-spacing: 0.04em; }
+  #rail .toggle-row { padding: 6px 0; }
+  #rail label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  #rail input[type=checkbox] { accent-color: var(--ochre); }
+  /* ── Year scrubber (bottom) ──────────────────────────────── */
+  #scrub {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    z-index: 10; width: 600px; max-width: 90vw;
+    padding: 14px 16px 12px;
+    background: rgba(12,9,6,0.82); border: 1px solid var(--rule);
+    backdrop-filter: blur(8px);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98;
+  }
+  #scrub .head { display: flex; justify-content: space-between; align-items: center; }
+  #scrub .head .lbl { font-family: 'Fraunces', serif; font-style: italic;
+                      font-size: 13px; color: var(--paper); font-weight: 400; }
+  #scrub .head .v { color: var(--ochre); }
+  #scrub input[type=range] { width: 100%; margin-top: 8px; accent-color: var(--ochre); }
+  /* Back link */
+  #back {
+    position: fixed; top: 24px; right: 260px; z-index: 10;
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: #cfbe98; text-decoration: none;
+    padding: 6px 10px; border: 1px solid var(--rule);
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(4px);
+  }
+  #back:hover { color: var(--ochre); border-color: var(--ochre); }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<a id="back" href="index.html">← back to map</a>
+
+<div id="title">
+  <div class="eyebrow">PC1 – PC3 flow · 200 k training sample</div>
+  <h1>How clearing pixels <em>move</em> in spectral feature space</h1>
+  <p>Each line is one detected pixel: green dot = pre-disturbance spectrum, orange dot = post-disturbance spectrum, in the same 3-D Δ-PC frame the dashboard's HDBSCAN clustering operates on. Drag to orbit, scroll to zoom. Use the year slider to play the flow forwards in time.</p>
+</div>
+
+<div id="rail">
+  <h3>Axes</h3>
+  <div class="row"><span>PC1</span><span class="axis-evr" id="evr-1">—</span></div>
+  <div class="row"><span>PC2</span><span class="axis-evr" id="evr-2">—</span></div>
+  <div class="row"><span>PC3</span><span class="axis-evr" id="evr-3">—</span></div>
+  <h3 style="margin-top: 12px;">Severity</h3>
+  <div class="toggle-row"><label><input type="checkbox" data-grp="severe" checked><span class="sw" style="background:#b73a3a;"></span>Severe</label></div>
+  <div class="toggle-row"><label><input type="checkbox" data-grp="heavy" checked><span class="sw" style="background:#d46d45;"></span>Heavy</label></div>
+  <div class="toggle-row"><label><input type="checkbox" data-grp="moderate" checked><span class="sw" style="background:#e7b27e;"></span>Moderate</label></div>
+  <h3 style="margin-top: 12px;">Cloud overlay</h3>
+  <div class="toggle-row"><label><input type="checkbox" id="t-pre" checked><span class="sw" style="background:#8caf82;"></span>pre cloud</label></div>
+  <div class="toggle-row"><label><input type="checkbox" id="t-post" checked><span class="sw" style="background:#c76340;"></span>post cloud</label></div>
+  <div class="toggle-row"><label><input type="checkbox" id="t-flow" checked>flow lines</label></div>
+</div>
+
+<div id="scrub">
+  <div class="head">
+    <span class="lbl">Year window</span>
+    <span class="v" id="scrub-v">2015 – 2024</span>
+  </div>
+  <input type="range" id="scrub-y" min="2015" max="2024" step="1" value="2024">
+  <div style="font-size:9px;color:var(--muted);margin-top:4px;">
+    drag = highest year shown; lines fade older → newer (viridis)
+  </div>
+</div>
+
+<script>
+const RAW_URL = 'data/pca_flow_sample.json';
+let raw = null, scene, camera, renderer, controls;
+let lineMesh, preMesh, postMesh;
+let hiddenGrps = new Set();
+let yearMax = 2024;
+let showPre = true, showPost = true, showFlow = true;
+
+// ── Viridis-like palette (continuous year colour) ─────────────────
+function viridis(t) {
+  const stops = [
+    [0.267, 0.005, 0.329],  // 0.0
+    [0.275, 0.193, 0.494],  // 0.2
+    [0.213, 0.359, 0.553],  // 0.4
+    [0.135, 0.518, 0.557],  // 0.5
+    [0.122, 0.639, 0.530],  // 0.6
+    [0.418, 0.781, 0.422],  // 0.8
+    [0.992, 0.906, 0.143],  // 1.0
+  ];
+  const n = stops.length - 1;
+  const i = Math.min(n - 1, Math.max(0, Math.floor(t * n)));
+  const f = t * n - i;
+  const a = stops[i], b = stops[i + 1];
+  return [a[0] + f*(b[0]-a[0]), a[1] + f*(b[1]-a[1]), a[2] + f*(b[2]-a[2])];
+}
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0806);
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(8, 6, 10);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById('scene').appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.target.set(-2, 0.5, 1);
+
+  // Subtle 3-axis grid + axis lines
+  drawAxes();
+
+  window.addEventListener('resize', onResize);
+  animate();
+}
+
+function drawAxes() {
+  // Three orthogonal axes in PC space, spanning roughly the data range
+  const axesGroup = new THREE.Group();
+  const axisDef = [
+    { dir: [1,0,0], col: 0x9c8b6e, len: 4, label: 'PC1' },
+    { dir: [0,1,0], col: 0x9c8b6e, len: 4, label: 'PC2' },
+    { dir: [0,0,1], col: 0x9c8b6e, len: 4, label: 'PC3' },
+  ];
+  for (const a of axisDef) {
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(a.dir[0]*a.len, a.dir[1]*a.len, a.dir[2]*a.len),
+    ]);
+    axesGroup.add(new THREE.Line(geom, new THREE.LineBasicMaterial({
+      color: a.col, transparent: true, opacity: 0.45 })));
+  }
+  // Labels via sprite
+  axisDef.forEach(a => {
+    const sp = makeTextSprite(a.label, '#e7c798');
+    sp.position.set(a.dir[0]*(a.len+0.4), a.dir[1]*(a.len+0.4), a.dir[2]*(a.len+0.4));
+    axesGroup.add(sp);
+  });
+  // Faint grid on PC1-PC2 plane
+  const grid = new THREE.GridHelper(8, 8, 0x4a3f2a, 0x2a2418);
+  grid.rotation.x = Math.PI / 2;
+  grid.material.transparent = true; grid.material.opacity = 0.35;
+  axesGroup.add(grid);
+  scene.add(axesGroup);
+}
+
+function makeTextSprite(text, color) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, 128, 64);
+  g.fillStyle = color;
+  g.font = 'bold 32px JetBrains Mono, monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 64, 32);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const sp = new THREE.Sprite(mat); sp.scale.set(0.8, 0.4, 1);
+  return sp;
+}
+
+function rebuild() {
+  if (!raw) return;
+  if (lineMesh) { scene.remove(lineMesh); lineMesh.geometry.dispose(); lineMesh.material.dispose(); }
+  if (preMesh)  { scene.remove(preMesh);  preMesh.geometry.dispose();  preMesh.material.dispose(); }
+  if (postMesh) { scene.remove(postMesh); postMesh.geometry.dispose(); postMesh.material.dispose(); }
+
+  const yMin = 2015, yMax = yearMax;
+  const linePos = [], lineCol = [];
+  const prePos = [], preCol = [];
+  const postPos = [], postCol = [];
+
+  for (const r of raw.rows) {
+    if (hiddenGrps.has(r.grp)) continue;
+    if (r.year > yMax) continue;
+    const t = (r.year - yMin) / Math.max(1, (2024 - yMin));
+    const [vr, vg, vb] = viridis(t);
+    linePos.push(r.pre[0],  r.pre[1],  r.pre[2]);
+    linePos.push(r.post[0], r.post[1], r.post[2]);
+    lineCol.push(vr, vg, vb, vr, vg, vb);
+    prePos.push(r.pre[0],  r.pre[1],  r.pre[2]);   preCol.push(0.55, 0.69, 0.51);
+    postPos.push(r.post[0], r.post[1], r.post[2]); postCol.push(0.78, 0.39, 0.25);
+  }
+
+  if (showFlow && linePos.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(lineCol, 3));
+    lineMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.55 }));
+    scene.add(lineMesh);
+  }
+  if (showPre && prePos.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(prePos, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(preCol, 3));
+    preMesh = new THREE.Points(g, new THREE.PointsMaterial({
+      vertexColors: true, size: 0.10, transparent: true, opacity: 0.85,
+      sizeAttenuation: true }));
+    scene.add(preMesh);
+  }
+  if (showPost && postPos.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(postPos, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(postCol, 3));
+    postMesh = new THREE.Points(g, new THREE.PointsMaterial({
+      vertexColors: true, size: 0.10, transparent: true, opacity: 0.85,
+      sizeAttenuation: true }));
+    scene.add(postMesh);
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+fetch(RAW_URL).then(r => r.json()).then(j => {
+  raw = j;
+  document.getElementById('evr-1').textContent = (j.pc_evr[0]*100).toFixed(0) + '% var';
+  document.getElementById('evr-2').textContent = (j.pc_evr[1]*100).toFixed(0) + '% var';
+  document.getElementById('evr-3').textContent = (j.pc_evr[2]*100).toFixed(0) + '% var';
+  init();
+  rebuild();
+});
+
+// ── Controls ──────────────────────────────────────────────────────
+document.querySelectorAll('input[data-grp]').forEach(el => {
+  el.addEventListener('change', () => {
+    const g = el.dataset.grp;
+    if (el.checked) hiddenGrps.delete(g); else hiddenGrps.add(g);
+    rebuild();
+  });
+});
+document.getElementById('t-pre').addEventListener('change',  e => { showPre  = e.target.checked; rebuild(); });
+document.getElementById('t-post').addEventListener('change', e => { showPost = e.target.checked; rebuild(); });
+document.getElementById('t-flow').addEventListener('change', e => { showFlow = e.target.checked; rebuild(); });
+document.getElementById('scrub-y').addEventListener('input', e => {
+  yearMax = +e.target.value;
+  document.getElementById('scrub-v').textContent = `2015 – ${yearMax}`;
+  rebuild();
+});
+</script>
+</body>
+</html>

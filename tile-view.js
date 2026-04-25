@@ -70,6 +70,7 @@
   let downX = 0, downY = 0, downT = 0;
   let hoverRaf = null, hoverEvt = null;
   let onHover = null;    // external callback for tooltip
+  let onZoom  = null;    // external callback fired on zoom change
   let onClick = null;
   let highlight = null;  // point to highlight
 
@@ -413,6 +414,7 @@
       const lonAfter = pixelToLonLat(mx, my);
       center[0] += lonBefore[0] - lonAfter[0];
       center[1] += lonBefore[1] - lonAfter[1];
+      if (onZoom) onZoom(zoom);
       draw();
     }, { passive: false });
 
@@ -810,6 +812,7 @@
       points = opts.points ?? [];
       visibleFn = opts.visible ?? (()=>true);
       onHover = opts.onHover ?? null;
+      onZoom  = opts.onZoom  ?? null;
       onClick = opts.onClick ?? null;
       container.classList.remove('hidden');
       opened = true;
@@ -839,6 +842,7 @@
     },
     zoomBy(delta) {
       zoom = Math.max(3, Math.min(18, zoom + delta));
+      if (onZoom) onZoom(zoom);
       draw();
     },
   };
