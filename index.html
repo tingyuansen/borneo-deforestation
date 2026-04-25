@@ -144,6 +144,33 @@
     width: 22px; height: 10px; border-radius: 2px;
     background: linear-gradient(90deg, #b73a3a, #c65438, #d46d45, #dc8551, #e29e66, #e7b27e);
   }
+  /* PC1-PC3 flow panel — small Three.js scene above the chip strip.
+     Visible in both views; particle count per chip is fixed on the
+     globe and viewport-scaled in the tile view (same data path as the
+     timeline + 'In view' counter, so year brush + before/after slider
+     + chip toggles all reach it for free). */
+  .flow-panel {
+    width: 260px;
+    border-radius: 8px;
+    background: rgba(12,9,6,0.55); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule-2);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .flow-panel .fp-canvas-wrap {
+    position: relative; width: 100%; height: 150px;
+  }
+  .flow-panel canvas { display: block; width: 100% !important; height: 100% !important; }
+  .flow-panel .fp-caption {
+    padding: 6px 12px 9px; font-family: 'Inter', sans-serif;
+    font-size: 10.5px; line-height: 1.45; color: #cfbe98;
+    border-top: 1px solid var(--rule-2);
+  }
+  .flow-panel .fp-caption em {
+    font-style: normal; color: var(--muted); font-size: 9.5px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+
   /* "In view" panel — live-updated hectares of visible deforestation
      whenever the user pans/zooms the tile map. Sits under the chips so
      the user can eyeball "I'm looking at N hectares of clearing". */
@@ -795,24 +822,39 @@
        Phase 1. Re-enable after K=15 hex layer is polished. -->
   <!-- Two confident HDBSCAN classes. Water-ward + mixed clusters are
        excluded up-stream so they can't distract from the real signal. -->
-  <!-- Deforestation by severity group. Each chip toggles one cohort of
-       HDBSCAN clusters. Severity = rank within the deforest-tagged
-       clusters by pixel count (bigger cluster = more common spectral
-       regime = "the typical clearing signature"). -->
-  <div class="cat-chip deforest" data-group="severe">
-    <span class="sw" style="background:#c65438;"></span>
-    <span class="lbl">Severe clearing</span>
-    <span class="count" id="ct-severe"></span>
+  <!-- PC1-PC3 flow visualisation. Three tubes pointing along each
+       chip's median Δ-PC vector, filled with droplets that fade from
+       forest green (pre) to chip colour (post). Particle count per
+       chip = fixed 180 on globe; viewport-scaled in tile view. -->
+  <div class="flow-panel" id="flow-panel">
+    <div class="fp-canvas-wrap">
+      <canvas id="flow-canvas"></canvas>
+    </div>
+    <div class="fp-caption">
+      Each tube is one chip's median pre&rarr;post spectral shift in PC space.
+      Droplets fade from intact-canopy green to chip colour as pixels move from before to after.
+      <span><em>drag to rotate</em></span>
+    </div>
   </div>
-  <div class="cat-chip deforest" data-group="heavy">
-    <span class="sw" style="background:#d46d45;"></span>
-    <span class="lbl">Heavy clearing</span>
-    <span class="count" id="ct-heavy"></span>
+  <!-- Three chips by physical clearing type, partitioned from the
+       cluster's reconstructed canonical Δ-color (Δ-NDVI / Δ-gNDWI /
+       Δ-NBR computed at boot from cluster_meta.mean_pre / mean_post).
+       Topographic-illumination clusters (topo_flag) and clusters
+       without a real ΔNDVI drop are excluded entirely. -->
+  <div class="cat-chip deforest" data-group="bare_soil">
+    <span class="sw" style="background:#9d6f3a;"></span>
+    <span class="lbl">Bare-soil clearing</span>
+    <span class="count" id="ct-bare_soil"></span>
   </div>
-  <div class="cat-chip deforest" data-group="moderate">
-    <span class="sw" style="background:#e7b27e;"></span>
-    <span class="lbl">Moderate / gradual</span>
-    <span class="count" id="ct-moderate"></span>
+  <div class="cat-chip deforest" data-group="canopy">
+    <span class="sw" style="background:#d4a661;"></span>
+    <span class="lbl">Canopy clearing</span>
+    <span class="count" id="ct-canopy"></span>
+  </div>
+  <div class="cat-chip deforest" data-group="wet_substrate">
+    <span class="sw" style="background:#14d4a4;"></span>
+    <span class="lbl">Wet-substrate clearing</span>
+    <span class="count" id="ct-wet_substrate"></span>
   </div>
   <div class="viewport-panel">
     <div class="vp-label">In view</div>
@@ -897,6 +939,7 @@
 
 <script src="globe.js"></script>
 <script src="tile-view.js"></script>
+<script src="flow-panel.js"></script>
 <script>
 /* ═════════════ Data constants ═════════════ */
 // Hex fill colour carries change-density — ranked by total detection count
@@ -1053,45 +1096,51 @@ function boot() {
   // DATA pilot array and the stat-card DOM — both commented out in Phase 1,
   // so nothing to update here. Restored when cluster labels are applied.
 
-  // Chip groups — each one toggles a set of cluster IDs on/off.
-  // Three chips by SPECTRAL MAGNITUDE within the non-topo deforest set.
-  // Topo-flagged clusters (median slope > 10° = ridge-line illumination
-  // drift the C-correction can't fully remove on >15° terrain) are
-  // dropped entirely — they were the bulk of the v1 "Suspect" chip and
-  // also leaked into severe/heavy when ranked by count.  Mountain
-  // (v1 hardcoded) and Ocean lists are no longer applied — slope_med
-  // and tag together do the right thing data-driven.
-  const _def = CLUSTER_META.clusters
-    .filter(c => c.tag === 'deforest' && !c.topo_flag);
-  const GROUPS = {
-    severe:   _def.filter(c => c.mag >= 0.18).map(c => c.id),                       // c12, c13, c15
-    heavy:    _def.filter(c => c.mag >= 0.16 && c.mag < 0.18).map(c => c.id),       // c2, c14
-    moderate: _def.filter(c => c.mag <  0.16).map(c => c.id),                       // c1, c3, c4
+  // Chip groups — three categories by physical CLEARING TYPE,
+  // partitioned from each cluster's reconstructed canonical Δ-color
+  // (Δ-NDVI / Δ-gNDWI / Δ-NBR computed from cluster_meta.mean_pre and
+  // mean_post).  Topo-flagged clusters and clusters with no real
+  // ΔNDVI drop are excluded entirely.  Rules:
+  //   bare_soil      ΔNDVI ≤ -0.18, ΔgNDWI ≥ +0.15  — full canopy loss + dry surface
+  //   canopy         ΔNDVI ≤ -0.10, ΔgNDWI ≥ +0.10  — typical canopy loss
+  //   wet_substrate  ΔNDVI ≤ -0.10, ΔgNDWI < +0.10, ΔNBR ≤ -0.15  — clearing on damp ground
+  const SB = ['B02','B03','B04','B05','B06','B07','B08','B8A','B11','B12'];
+  const ndi = (sp, a, b) => {
+    const ai = SB.indexOf(a), bi = SB.indexOf(b);
+    return (sp[ai] - sp[bi]) / (sp[ai] + sp[bi] + 1e-9);
   };
-  const GROUP_OF = {};
-  for (const [g, ids] of Object.entries(GROUPS)) {
-    for (const id of ids) GROUP_OF[id] = g;
+  const chipOf = (c) => {
+    if (c.tag !== 'deforest' || c.topo_flag) return null;
+    if (!c.mean_pre || !c.mean_post) return null;
+    const d_ndvi  = ndi(c.mean_post, 'B08', 'B04') - ndi(c.mean_pre, 'B08', 'B04');
+    const d_gndwi = ndi(c.mean_post, 'B03', 'B11') - ndi(c.mean_pre, 'B03', 'B11');
+    const d_nbr   = ndi(c.mean_post, 'B08', 'B12') - ndi(c.mean_pre, 'B08', 'B12');
+    if (d_ndvi > -0.05) return null;                                   // no real veg loss
+    if (d_ndvi <= -0.18 && d_gndwi >= 0.15) return 'bare_soil';
+    if (d_ndvi <= -0.10 && d_gndwi >= 0.10) return 'canopy';
+    if (d_ndvi <= -0.10 && d_gndwi <  0.10 && d_nbr <= -0.15) return 'wet_substrate';
+    return null;
+  };
+  const GROUPS = { bare_soil: [], canopy: [], wet_substrate: [] };
+  for (const c of CLUSTER_META.clusters) {
+    const g = chipOf(c);
+    if (g) GROUPS[g].push(c.id);
   }
+  const GROUP_OF = {};
+  for (const [g, ids] of Object.entries(GROUPS)) for (const id of ids) GROUP_OF[id] = g;
   window._GROUPS = GROUPS;
   window._GROUP_OF = GROUP_OF;
 
-  // Per-pixel dot colours. Sync cluster.color in CLUSTER_META to the
-  // chip-group swatch so toggling a chip moves the dots that match its
-  // colour.  Without this, cluster.color (set by Stage 6 against a
-  // different ranking) is randomly distributed across chips — e.g. c4
-  // paints deep red but lives in the Moderate chip, so toggling
-  // Moderate makes deep-red dots vanish (which the user reads as a
-  // bug).  Topo + non-deforest cluster colours are zeroed defensively
-  // so a filter regression can't leak the wrong shade.
+  // Sync cluster.color to chip-group swatch so chip toggle ↔ dot colour
+  // is coherent.  Non-chip clusters get transparent so they can't leak.
   const CHIP_COLOR = {
-    severe:   '#c65438',     // chip swatch (HTML)
-    heavy:    '#d46d45',
-    moderate: '#e7b27e',
+    bare_soil:     '#9d6f3a',
+    canopy:        '#d4a661',
+    wet_substrate: '#14d4a4',
   };
   for (const c of CLUSTER_META.clusters) {
     const g = GROUP_OF[c.id];
-    if (g && CHIP_COLOR[g]) c.color = CHIP_COLOR[g];
-    else c.color = 'rgba(0,0,0,0)';   // topo / mixed / outside any chip
+    c.color = (g && CHIP_COLOR[g]) ? CHIP_COLOR[g] : 'rgba(0,0,0,0)';
   }
   // Per-group hidden state. Clicking a chip toggles the whole group.
   const hiddenGroups = new Set();
@@ -1121,6 +1170,7 @@ function boot() {
       } else if (window._refreshViewportHist) {
         window._refreshViewportHist(null);
       }
+      if (window.FlowPanel) window.FlowPanel.setHiddenGroups(hiddenGroups);
     });
   });
 
@@ -1210,6 +1260,19 @@ function boot() {
   });
   document.getElementById('back-to-globe').addEventListener('click', () => {
     closeTileView();
+    // Pull the globe camera back out past AUTO_TILE_DIST (1.25) — otherwise
+    // setupZoomIndicator's 200 ms poll re-opens the tile view because we're
+    // still zoomed in close to Sarawak. Suppress the auto-bridge for the
+    // full fly-back duration so the bridge can't re-fire while dist is
+    // mid-animation, then restore auto-rotate (flyTo itself zeroes it).
+    window._suppressAutoTile = true;
+    const ar = document.getElementById('tw-autorot');
+    const restore = () => {
+      window._suppressAutoTile = false;
+      if (globe && ar) globe.setAutoRotate(ar.checked);
+    };
+    if (globe) globe.flyTo(114.05, 4.05, 3.2, 1400).then(restore);
+    else setTimeout(restore, 1800);
   });
   // Drawer
   setupDrawer();
@@ -1223,6 +1286,11 @@ function boot() {
   setupTileConsole();
   // Range label
   updateRangeLabel();
+  // Boot the PC1-PC3 flow panel above the chip strip. Default mode is
+  // 'fixed' (180 droplets per chip) — switched to 'viewport' on tile-view
+  // open so particle counts reflect what's actually in the map view.
+  const flowCanvas = document.getElementById('flow-canvas');
+  if (flowCanvas && window.FlowPanel) window.FlowPanel.init(flowCanvas);
 }
 
 function recencySize(d) {
@@ -1244,16 +1312,13 @@ function drawHistogram() {
   if (!CLUSTER_META || !CLUSTER_META.clusters) return;
 
   const YEAR_LO = 2015, YEAR_HI = 2024;
-  // Stack layers mirror the three chips: severe / heavy / moderate.
-  // Each chip maps to a fixed set of clusters (window._GROUPS), and the
-  // swatch colors come from the chip DOM so stack === chip exactly.
-  // Suspect chip removed — topo-flagged clusters (where the v1 Suspect
-  // chip lived) are dropped at the data filter, not toggled.
-  const TAGS = ['severe', 'heavy', 'moderate'];
+  // Stack layers mirror the three chips: bare_soil / canopy / wet_substrate.
+  // Stack layers mirror the three chips by physical clearing type.
+  const TAGS = ['bare_soil', 'canopy', 'wet_substrate'];
   const TAG_COLOR = {
-    severe:   '#c65438',
-    heavy:    '#d46d45',
-    moderate: '#e7b27e',
+    bare_soil:     '#9d6f3a',
+    canopy:        '#d4a661',
+    wet_substrate: '#14d4a4',
   };
   // Precompute cluster_id → group lookup once so both the global + viewport
   // aggregators can route a cluster's count into the right stack layer.
@@ -1500,18 +1565,25 @@ function drawHistogram() {
     if (cachedLayout && cachedLayout.renderBars) cachedLayout.renderBars();
     else draw();
     const vp = document.getElementById('vp-ha');
-    if (vp) {
-      const hidden = (window._state && window._state.hiddenGroups) || new Set();
-      let px = 0;
-      for (const row of binData) {
-        for (const k of TAGS) {
-          if (hidden.has(k)) continue;
-          px += row[k] || 0;
-        }
+    const hidden = (window._state && window._state.hiddenGroups) || new Set();
+    let px = 0;
+    // Per-chip totals share the same year-filtered binData the bar chart
+    // uses, so the flow panel's particle counts inherit year brush +
+    // before/after slider + chip toggles for free.
+    const perChip = { bare_soil: 0, canopy: 0, wet_substrate: 0 };
+    for (const row of binData) {
+      for (const k of TAGS) {
+        const c = row[k] || 0;
+        if (k in perChip) perChip[k] += c;
+        if (hidden.has(k)) continue;
+        px += c;
       }
+    }
+    if (vp) {
       const fmtHa = window._fmtHa || (ha => Math.round(ha) + ' ha');
       vp.textContent = yt ? fmtHa(px * 0.01) : '—';
     }
+    if (window.FlowPanel) window.FlowPanel.setViewportCounts(yt ? perChip : null);
   };
 
   draw();
@@ -1858,6 +1930,7 @@ function openTileView() {
     },
   });
   document.body.classList.add('in-tile-view');
+  if (window.FlowPanel) window.FlowPanel.setMode('viewport');
   // Initial spectrum-panel state — show only if we open at per-pixel zoom.
   const z0 = (window.TileView && window.TileView.getZoom) ? window.TileView.getZoom() : 13;
   if (z0 >= 12) showSpectrumPanel(null); else hideSpectrumPanel();
@@ -1906,6 +1979,12 @@ function closeTileView() {
   document.body.classList.remove('in-tile-view');
   document.getElementById('tooltip').style.visibility = 'hidden';
   hideSpectrumPanel();
+  if (window.FlowPanel) window.FlowPanel.setMode('fixed');
+  // Restore auto-rotate to whatever the user last had it set to in the
+  // tweaks panel — opening the tile view forced it off, and without this
+  // the globe sits frozen after Back-to-globe.
+  const ar = document.getElementById('tw-autorot');
+  if (globe && ar) globe.setAutoRotate(ar.checked);
   // Histogram reverts to the global dataset so it doesn't sit showing
   // whatever viewport snapshot the tile view last pushed.
   if (window._refreshViewportHist) window._refreshViewportHist(null);
@@ -1929,8 +2008,12 @@ function setupZoomIndicator() {
     }
     // Cross into tile-view once the user has zoomed in far enough for
     // per-pixel dots to be readable. Only fires if we're currently on the
-    // globe — doesn't re-trigger while already in tile view.
-    if (d < AUTO_TILE_DIST && !document.body.classList.contains('in-tile-view')) {
+    // globe — doesn't re-trigger while already in tile view.  The
+    // _suppressAutoTile guard blocks the bridge during the manual
+    // back-to-globe fly-out, which would otherwise re-open the tile view
+    // mid-animation while dist is still below AUTO_TILE_DIST.
+    if (!window._suppressAutoTile &&
+        d < AUTO_TILE_DIST && !document.body.classList.contains('in-tile-view')) {
       globe.setAutoRotate(false);
       openTileView();
     }

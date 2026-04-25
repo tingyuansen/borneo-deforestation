@@ -21,13 +21,13 @@ Live demo: <https://tingyuansen.github.io/borneo-deforestation/>
 - Before/after slider clips the detection overlay to the right of the handle; the histogram counts only what's still visible.
 
 ### Timeline + chips + counters
-- Stacked-area histogram (D3) with four layers matching the four chips:
-  - **Severe clearing** (`#c65438`) — the single largest deforest cluster.
-  - **Heavy clearing** (`#d46d45`) — 2nd-largest.
-  - **Moderate / gradual** (`#e7b27e`) — the remaining non-suspect deforest clusters.
-  - **Suspect (topo / weak)** (`#e8d9b8`, pale yellow) — mountain-cohort clusters whose deforest signal is likely a topographic-illumination artefact.
+- Stacked-area histogram (D3) with three layers matching the three chips:
+  - **Bare-soil clearing** (`#9d6f3a`) — full canopy loss to dry mineral soil; deepest spectral footprint.
+  - **Canopy clearing** (`#d4a661`) — typical canopy loss with mixed surface response.
+  - **Wet-substrate clearing** (`#14d4a4`) — clearing on damp ground (peat, swamp, slash-and-burn in wet conditions, palm planting on moist soil).
+- Chip categories are partitioned from each cluster's reconstructed canonical Δ-color (Δ-NDVI, Δ-gNDWI, Δ-NBR computed at boot from `cluster_meta.mean_pre / mean_post`); topographic-illumination clusters and clusters with no real ΔNDVI drop are excluded.
 - Brush = year-range filter (2015–2024, fractional); applied live to globe + tile-view layers.
-- `y`-axis ceiling is computed from all four groups together, so toggling a chip hides its layer without rescaling the chart.
+- `y`-axis ceiling is computed from all three groups together, so toggling a chip hides its layer without rescaling the chart.
 - "In view" hectare counter updates from the tile-view viewport (hex aggregate at low zoom, `.bin` streaming at close zoom).
 
 ## Data layout
