@@ -126,7 +126,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const RAW_URL = 'data/pca_flow_sample.json';
+const RAW_URL = 'data/pca_flow_sample.json?v=' + Date.now();   // cache-bust each load
 const CYCLE_SEC = 8.0;       // total animation period
 const TRAVEL_FRAC = 0.25;    // fraction of cycle each particle takes to traverse pre→post
 const YR_MIN = 2015, YR_MAX = 2024;
@@ -161,11 +161,11 @@ function init() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
-  // Camera target at the data centroid so the orbit rotates around it.
-  controls.target.set(-2, 0, 1);
-  // Camera position offset from target so the data is in frame.
-  camera.position.set(-2 + 8, 6, 1 + 10);
-  camera.lookAt(-2, 0, 1);
+  // Sample is pre-centred around origin (centroid subtracted in the
+  // data prep) so camera target = origin.
+  controls.target.set(0, 0, 0);
+  camera.position.set(8, 6, 10);
+  camera.lookAt(0, 0, 0);
 
   drawAxes();
   window.addEventListener('resize', onResize);
@@ -346,9 +346,35 @@ function buildFlow() {
   flowPoints = new THREE.Points(geom, mat);
   flowPoints.renderOrder = 2;          // above the density cloud
   scene.add(flowPoints);
+
+  // ── Diagnostic: a parallel static Points cloud using PointsMaterial
+  // (no shader, no animation).  If the shader-based flowPoints isn't
+  // visible but THIS one is, the problem is in the shader; if neither
+  // is visible the problem is elsewhere (geometry, camera, depth).
+  // Renders only the HEAD positions at pre, in the same colours.
+  const debugPos = new Float32Array(N*3);
+  const debugCol = new Float32Array(N*3);
+  for (let i = 0; i < N; i++) {
+    const r = rows[i];
+    debugPos[i*3+0] = r.pre[0]; debugPos[i*3+1] = r.pre[1]; debugPos[i*3+2] = r.pre[2];
+    const [cr, cg, cb] = GRP_COL[r.grp] || [1, 1, 1];
+    debugCol[i*3+0] = cr; debugCol[i*3+1] = cg; debugCol[i*3+2] = cb;
+  }
+  const dgeom = new THREE.BufferGeometry();
+  dgeom.setAttribute('position', new THREE.Float32BufferAttribute(debugPos, 3));
+  dgeom.setAttribute('color',    new THREE.Float32BufferAttribute(debugCol, 3));
+  const dmat = new THREE.PointsMaterial({
+    vertexColors: true, size: 0.10, sizeAttenuation: true,
+    transparent: false, depthWrite: true,
+  });
+  const dpts = new THREE.Points(dgeom, dmat);
+  dpts.renderOrder = 3;
+  scene.add(dpts);
+
   console.log(`[pca_flow] built ${N} pixels × ${TAIL_LEN+1} samples = ${M} vertices, range PC1 [`,
     Math.min(...rows.map(r => Math.min(r.pre[0], r.post[0]))).toFixed(2), ',',
-    Math.max(...rows.map(r => Math.max(r.pre[0], r.post[0]))).toFixed(2), ']');
+    Math.max(...rows.map(r => Math.max(r.pre[0], r.post[0]))).toFixed(2),
+    '] (debug PointsMaterial cloud added at renderOrder 3)');
 }
 
 // ── Density cloud (combined pre + post) ───────────────────────────
