@@ -36,7 +36,7 @@
 
   // ── Tile cache (one global LRU) ────────────────────────────────────
   const tileCache = new Map();
-  const MAX_CACHE = 200;
+  const MAX_CACHE = 400;     // 4K screens at zoom 13 want ~50 tiles × 2 layers
   function getTile(z, x, y, onReady) {
     const key = `${z}/${x}/${y}`;
     if (tileCache.has(key)) {
@@ -182,14 +182,26 @@
         const latMin = dv.getFloat32(8, true);
         // 6 bytes/pixel in segments: dx u16 | dy u16 | yr u8 | cl u8.
         // cl = HDBSCAN cluster id (0..18) or 255 for outlier (from
-        // 10_chunk_labeled_tiles.py). Reserved id lets us distinguish
-        // real clusters from "propagation noise" in the browser.
+        // 09_chunk_tiles.py). Reserved id lets us distinguish real
+        // clusters from "propagation noise" in the browser.
         const off = 12;
         const dx = new Uint16Array(buf, off,          n);
         const dy = new Uint16Array(buf, off + 2*n,    n);
         const yr = new Uint8Array (buf, off + 4*n,    n);
         const cl = new Uint8Array (buf, off + 5*n,    n);
-        binCache.set(key, { n, lonMin, latMin, dx, dy, yr, cl });
+        // Per-tile Sarawak-clip status — sample 9 corner+midpoint points
+        // to classify the tile as ALL_IN / ALL_OUT / MIXED.  Saves the
+        // per-pixel polygon test (1100 ops × ~250K-1M pixels per tile)
+        // for the common case of fully-inland tiles.
+        const lonMax = lonMin + TILE_BIN_DEG, latMax = latMin + TILE_BIN_DEG;
+        let inHits = 0;
+        for (let lo of [lonMin, (lonMin+lonMax)/2, lonMax]) {
+          for (let la of [latMin, (latMin+latMax)/2, latMax]) {
+            if (inSarawak(lo, la)) inHits++;
+          }
+        }
+        const _inSarStatus = inHits === 9 ? 'all' : inHits === 0 ? 'none' : 'mixed';
+        binCache.set(key, { n, lonMin, latMin, dx, dy, yr, cl, _inSarStatus });
         while (binCache.size > BIN_MAX_CACHE) {
           const oldest = binCache.keys().next().value;
           binCache.delete(oldest);
@@ -258,11 +270,14 @@
       // The bbox spills into Brunei/Sabah/Kalimantan — those should
       // not contribute to the "In view" hectare readout.
       let src;
+      // _inSarawak is precomputed once on hex load (see index.html
+      // tagHexesInSarawak) — replaces the per-frame polygon test which
+      // ran ~1100 ops × N hexes per render frame.
       if (useFine) {
         src = [];
         for (const h of fine) {
           if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
-          if (!inSarawak(h.lon, h.lat)) continue;
+          if (h._inSarawak === false) continue;
           src.push(h);
         }
       } else {
@@ -270,7 +285,7 @@
         src = [];
         for (const h of coarse) {
           if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
-          if (!inSarawak(h.lon, h.lat)) continue;
+          if (h._inSarawak === false) continue;
           src.push(h);
         }
       }
@@ -509,11 +524,24 @@
     const halfW = W/2, halfH = H/2;
     const r2max = PICK_PIXEL_RADIUS * PICK_PIXEL_RADIUS;
     let bestD = r2max, bestI = -1;
-    // Linear scan; tiles top out around 1 M pixels which is a few ms.
+    // Lon/lat bbox around the cursor at the current zoom — used to skip
+    // the per-pixel projection for far-away pixels.  Covers the pick
+    // radius plus a bit of slack.  At zoom 16 with a 14-px radius this
+    // window is ~0.0002° wide → ~99 % of the tile's pixels are skipped.
+    const dlon = (PICK_PIXEL_RADIUS + 4) / (lon2x(180, zoom) - lon2x(-180, zoom)) * 360;
+    const lonLo = lon - dlon, lonHi = lon + dlon;
+    const latLo = lat - dlon, latHi = lat + dlon;   // dlon ≈ dlat at this lat
+    const dxLo = (lonLo - lonMin) / tileInvScale;
+    const dxHi = (lonHi - lonMin) / tileInvScale;
+    const dyLo = (latLo - latMin) / tileInvScale;
+    const dyHi = (latHi - latMin) / tileInvScale;
     for (let i = 0; i < n; i++) {
       if (cl[i] === 255) continue;       // outliers don't paint, skip pick
-      const plon = lonMin + dx[i] * tileInvScale;
-      const plat = latMin + dy[i] * tileInvScale;
+      const dxi = dx[i], dyi = dy[i];
+      if (dxi < dxLo || dxi > dxHi) continue;
+      if (dyi < dyLo || dyi > dyHi) continue;
+      const plon = lonMin + dxi * tileInvScale;
+      const plat = latMin + dyi * tileInvScale;
       const sx = lon2x(plon, zoom) - cx + halfW;
       const sy = lat2y(plat, zoom) - cy + halfH;
       const ddx = sx - mx, ddy = sy - my;
@@ -552,6 +580,21 @@
     const cx = ((center[0] + 180) / 360) * s;
     const sLat = Math.sin(center[1] * Math.PI / 180);
     const cy = (0.5 - Math.log((1+sLat)/(1-sLat)) / (4*Math.PI)) * s;
+
+    // Frame-constant projector — same arithmetic as lon2x / lat2y but
+    // hoists Math.pow(2, zoom)*TILE_SIZE out of the per-hex loops below.
+    // At fine zoom the hex render projects ~14 verts × 293K hexes per
+    // frame; saving one Math.pow per call adds up.
+    const _frameS  = Math.pow(2, zoom) * TILE_SIZE;
+    const _frameCx = ((center[0] + 180) / 360) * _frameS;
+    const _frameCy = (0.5 - Math.log((1+sLat)/(1-sLat)) / (4*Math.PI)) * _frameS;
+    const _halfW = W/2, _halfH = H/2;
+    const D2R = Math.PI / 180, INV4PI = 1 / (4*Math.PI);
+    const projLonX = (lon) => ((lon + 180)/360)*_frameS - _frameCx + _halfW;
+    const projLatY = (lat) => {
+      const sl = Math.sin(lat * D2R);
+      return (0.5 - Math.log((1+sl)/(1-sl)) * INV4PI) * _frameS - _frameCy + _halfH;
+    };
 
     // Visible tile range
     const halfW = W / (2 * scale), halfH = H / (2 * scale);
@@ -660,8 +703,10 @@
       for (const [iy, ix] of visibleBinTiles()) {
         const tile = fetchBinTile(iy, ix);
         if (!tile) continue;
+        if (tile._inSarStatus === 'none') continue;     // whole tile outside
         const { n, lonMin, latMin, dx, dy, yr, cl } = tile;
         const hiddenClusters = window._hiddenClusters;
+        const checkPerPx = tile._inSarStatus === 'mixed';
         for (let i = 0; i < n; i += stride) {
           const cid = cl[i];
           if (cid === 255) continue;                 // propagation outlier
@@ -671,7 +716,7 @@
           if (yr[i] < yrLoRel || yr[i] > yrHiRel) continue;
           const lon = lonMin + dx[i] * tileInvScale;
           const lat = latMin + dy[i] * tileInvScale;
-          if (!inSarawak(lon, lat)) continue;
+          if (checkPerPx && !inSarawak(lon, lat)) continue;
           const sx = lon2x(lon, zoom) - cx + halfW;
           const sy = lat2y(lat, zoom) - cy + halfH;
           if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
@@ -702,7 +747,7 @@
         // OCEAN_CLUSTERS + elev_m filters dropped (wrong for v3).
         hexSource = fine.filter(h => {
           if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
-          return inSarawak(h.lon, h.lat);
+          return h._inSarawak !== false;     // cached at load
         });
         // Rank is computed per-frame against the viewport-visible subset
         // (see hexPolys block below), so the colour ramp re-spans 0-1 at
@@ -715,7 +760,7 @@
         const coarse = window.SARAWAK_HEXES_COARSE || [];
         hexSource = coarse.filter(h => {
           if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
-          return inSarawak(h.lon, h.lat);
+          return h._inSarawak !== false;     // cached at load
         });
         rankFn = null;   // viewport-relative rank assigned below
       }
@@ -733,14 +778,17 @@
       const hexPolys = [];
       for (let i = 0; i < hexSource.length; i++) {
         const p = hexSource[i];
-        const [sx, sy] = lonLatToPixel(p.lon, p.lat);
+        const sx = projLonX(p.lon), sy = projLatY(p.lat);
         if (sx < -200 || sx > W+200 || sy < -200 || sy > H+200) continue;
-        if (!(hasH3 && p.h3)) continue;
-        const verts = window.h3.cellToBoundary(p.h3);
+        // _verts cached at hex-load time (see index.html
+        // tagHexesInSarawak).  Falls back to a runtime h3 call if the
+        // hex came from somewhere that didn't go through the cache.
+        const verts = p._verts || (hasH3 && p.h3 ? window.h3.cellToBoundary(p.h3) : null);
+        if (!verts) continue;
         const poly = new Array(verts.length);
         for (let j = 0; j < verts.length; j++) {
-          const [vlat, vlon] = verts[j];
-          poly[j] = lonLatToPixel(vlon, vlat);
+          const v = verts[j];
+          poly[j] = [projLonX(v[1]), projLatY(v[0])];   // verts are [lat, lon]
         }
         hexPolys.push({ p, poly });
       }

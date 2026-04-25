@@ -1023,6 +1023,27 @@ let CLUSTER_META         = null;
 
 console.log('[boot] starting fetches');
 
+// One-time per-hex precompute.  Coarse + fine arrays both pay the
+// polygon test AND the h3.cellToBoundary call once (at load) instead
+// of every render frame.  At fine zoom this saves ~322M polygon ops
+// + ~1.7M h3 calls per render frame.
+function tagHexesInSarawak(arr) {
+  if (!arr || !arr.length) return;
+  const inSar = window.inSarawak || (() => true);
+  const h3lib = window.h3;
+  const t0 = performance.now();
+  for (let i = 0; i < arr.length; i++) {
+    const h = arr[i];
+    h._inSarawak = inSar(h.lon, h.lat);
+    // Cache the hexagon boundary verts in [lat, lon] form.  Per-frame
+    // cost drops to a pure projection — no h3-lib call, no allocation.
+    if (h3lib && h.h3 && !h._verts) {
+      h._verts = h3lib.cellToBoundary(h.h3);
+    }
+  }
+  console.log(`[boot] tagHexes (inSar + verts): ${arr.length} hexes in ${(performance.now()-t0).toFixed(0)} ms`);
+}
+
 Promise.all([
   fetch(P('manifest.json')).then(r=>r.json()),
   fetch(P('sarawak_hexes_2of3_res7.json')).then(r=>r.json())
@@ -1031,6 +1052,10 @@ Promise.all([
     .catch(e => { console.warn('[boot] cluster meta fetch failed', e); return null; }),
 ]).then(([manifest, hexCoarse, clusterMeta]) => {
   MANIFEST = manifest;
+  // Tag each hex once with _inSarawak so render + filter loops can short-
+  // circuit the polygon check (which costs ~1100 ops/call across 14 rings).
+  // Without this we'd pay 45K × 1100 = 50M ops per coarse-render frame.
+  tagHexesInSarawak(hexCoarse);
   SARAWAK_HEXES_COARSE = hexCoarse;
   CLUSTER_META         = clusterMeta;
   window.SARAWAK_HEXES_COARSE = SARAWAK_HEXES_COARSE;
@@ -1051,6 +1076,7 @@ function ensureFineHexes() {
   if (window.SARAWAK_HEXES_FINE || _finePending) return _finePending;
   _finePending = fetch(P('sarawak_hexes_2of3_res8.json'))
     .then(r => r.json()).then(x => {
+      tagHexesInSarawak(x);                  // see boot path comment above
       SARAWAK_HEXES_FINE = x;
       window.SARAWAK_HEXES_FINE = x;
       console.log(`[lazy] fine hexes loaded: ${x.length}`);
@@ -1077,7 +1103,6 @@ function buildPoints() {
   // ramp, which reads as "the remaining clusters are still meaningful").
   const hiddenClusters = (window._state && window._state.hiddenClusters)
     || new Set();
-  const _isInSarawak = window.inSarawak || (() => true);
   const _byId = Object.fromEntries(
     (CLUSTER_META?.clusters || []).map(c => [c.id, c]));
   const visible = [];
@@ -1086,7 +1111,7 @@ function buildPoints() {
     if (h.tag !== 'deforest') continue;
     const cmeta = _byId[h.cluster_id];
     if (!cmeta || cmeta.topo_flag) continue;
-    if (!_isInSarawak(h.lon, h.lat)) continue;
+    if (h._inSarawak === false) continue;     // cached at load time
     if (hiddenClusters.has(h.cluster_id)) continue;   // chip toggle
     visible.push(h);
   }
@@ -1225,12 +1250,11 @@ function boot() {
   // over inSarawak hexes drops those, so chip totals reconcile with the
   // "In view" hectare readout at full zoom-out.
   function refreshChipCounts() {
-    const isInSarawak = window.inSarawak || (() => true);
     const totals = {};
     for (const g of Object.keys(GROUPS)) totals[g] = 0;
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
       if (h.tag !== 'deforest') continue;
-      if (!isInSarawak(h.lon, h.lat)) continue;
+      if (h._inSarawak === false) continue;
       const grp = GROUP_OF[h.cluster_id];
       if (!grp || !(grp in totals)) continue;
       totals[grp] += h.deforest_n || 0;
@@ -1508,10 +1532,9 @@ function drawHistogram() {
       yt[y] = {};
       for (const k of TAGS) yt[y][k] = 0;
     }
-    const isInSarawak = window.inSarawak || (() => true);
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
       if (h.tag !== 'deforest') continue;
-      if (!isInSarawak(h.lon, h.lat)) continue;
+      if (h._inSarawak === false) continue;
       const grp = GROUP_OF[h.cluster_id];
       if (!grp || !(grp in yt[YEAR_LO])) continue;
       const yy = h.y;
