@@ -324,36 +324,33 @@
   }
   #tooltip .t-meta { font-family: 'JetBrains Mono', monospace;
     color: #cfbe98; font-size: 11px; letter-spacing: 0.04em; }
-  /* Spectrum panel — fixed top-right, updates on hover in per-pixel view.
-     Shows the dominant cluster's mean pre/post 10-band reflectance as
-     overlaid radar polygons.  Only visible inside the tile view at
-     symbol-zoom (zoom ≥ 12); hidden otherwise. */
+  /* Spectrum panel — fixed top-right, compact "clock-style" widget that
+     updates on per-pixel hover.  Shows the dominant cluster's mean
+     pre/post 10-band reflectance as a small overlaid radar plus one
+     tight description line. */
   #spectrum-panel {
-    position: fixed; z-index: 25; top: 120px; right: 24px;
-    width: 220px; background: rgba(12,9,6,0.92); color: var(--paper);
+    position: fixed; z-index: 25; top: 96px; right: 18px;
+    width: 158px; background: rgba(12,9,6,0.88);
     border: 1px solid var(--rule-2); border-radius: 2px;
-    padding: 12px 14px 10px; font-size: 12.5px; line-height: 1.5;
-    backdrop-filter: blur(8px); box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    padding: 8px 8px 6px; backdrop-filter: blur(8px);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.55);
     visibility: hidden; pointer-events: none;
   }
   #spectrum-panel.visible { visibility: visible; }
-  #spectrum-panel .sp-head { font-family: 'Fraunces', serif; font-size: 14px; margin-bottom: 4px; }
-  #spectrum-panel .sp-meta { font-family: 'JetBrains Mono', monospace;
-    color: #cfbe98; font-size: 11px; letter-spacing: 0.04em; }
-  #spectrum-panel .sp-hint { font-family: 'JetBrains Mono', monospace;
-    color: var(--muted); font-size: 10px; letter-spacing: 0.06em;
-    text-transform: uppercase; }
-  #spectrum-panel svg { display: block; width: 200px; height: 200px; margin: 6px auto 2px; }
-  #spectrum-panel .sp-axis { stroke: rgba(244,237,225,0.18); stroke-width: 0.5; fill: none; }
-  #spectrum-panel .sp-grid { stroke: rgba(244,237,225,0.10); stroke-width: 0.5; fill: none; }
-  #spectrum-panel .sp-label { font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
-    fill: #cfbe98; letter-spacing: 0.03em; text-anchor: middle; dominant-baseline: middle; }
-  #spectrum-panel .sp-pre  { fill: rgba(140, 175, 130, 0.20); stroke: #8caf82; stroke-width: 1.4; }
-  #spectrum-panel .sp-post { fill: rgba(199, 99, 64, 0.22); stroke: #c76340; stroke-width: 1.4; }
-  #spectrum-panel .sp-legend { display: flex; gap: 10px; font-family: 'JetBrains Mono', monospace;
-    font-size: 9px; color: #cfbe98; letter-spacing: 0.04em; margin-top: 4px; }
-  #spectrum-panel .sp-legend .sw { width: 8px; height: 8px; display: inline-block;
-    border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  #spectrum-panel svg { display: block; width: 140px; height: 140px; margin: 0 auto; }
+  #spectrum-panel .sp-axis  { stroke: rgba(244,237,225,0.16); stroke-width: 0.5; fill: none; }
+  #spectrum-panel .sp-grid  { stroke: rgba(244,237,225,0.08); stroke-width: 0.5; fill: none; }
+  #spectrum-panel .sp-label { font-family: 'JetBrains Mono', monospace; font-size: 7.5px;
+    fill: #cfbe98; letter-spacing: 0.02em; text-anchor: middle; dominant-baseline: middle; }
+  #spectrum-panel .sp-pre   { fill: rgba(140, 175, 130, 0.20); stroke: #8caf82; stroke-width: 1.2; }
+  #spectrum-panel .sp-post  { fill: rgba(199, 99, 64, 0.22); stroke: #c76340; stroke-width: 1.2; }
+  #spectrum-panel .sp-line  { font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    color: #cfbe98; letter-spacing: 0.04em; text-align: center;
+    margin-top: 2px; line-height: 1.35; }
+  #spectrum-panel .sp-line .sw {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin: 0 3px 0 6px; vertical-align: middle;
+  }
 
   /* Inspector (pinned on click) */
   #inspector {
@@ -873,19 +870,15 @@
 
 <div id="tooltip"></div>
 
-<!-- Spectrum panel — fixed top-right in tile view, updates on per-pixel
-     hover.  Shows the dominant cluster's mean pre/post 10-band reflectance
-     plus three ND-index deltas (NDVI / gNDWI / NBR) so the user can read
-     the directional signature even when raw bands all move the same way. -->
+<!-- Spectrum panel — compact clock-style widget at top-right.  Radar
+     scaffold is always drawn; pre/post polygons swap as cursor crosses
+     dots in per-pixel view.  Single text line under the radar carries
+     the cluster id + tag (or the empty-state hint). -->
 <div id="spectrum-panel">
-  <div class="sp-head" id="sp-head">Spectrum</div>
-  <div class="sp-meta" id="sp-meta">hover a dot to inspect</div>
   <div id="sp-svg"></div>
-  <div class="sp-meta" id="sp-indices"></div>
-  <div class="sp-legend">
-    <span><span class="sw" style="background:#8caf82;"></span>pre</span>
-    <span><span class="sw" style="background:#c76340;"></span>post</span>
-    <span style="margin-left:auto;color:var(--muted);font-size:9px;">10 S2 bands · ρ ∈ [0, 0.5]</span>
+  <div class="sp-line" id="sp-line">
+    <span class="sw" style="background:#8caf82;"></span>pre
+    <span class="sw" style="background:#c76340;"></span>post
   </div>
 </div>
 <div id="inspector">
@@ -1564,7 +1557,7 @@ function nd(spectrum, a, b) {
 // scaffold, so the panel stays visually stable as the cursor moves
 // between hits and misses.
 function spectrumRadarSVG(meanPre, meanPost) {
-  const W = 200, H = 200, cx = W/2, cy = H/2, R = 72;
+  const W = 140, H = 140, cx = W/2, cy = H/2, R = 48;
   const N = 10;
   const pt = (i, val) => {
     const t = (i / N) * 2 * Math.PI - Math.PI / 2;
@@ -1586,48 +1579,24 @@ function spectrumRadarSVG(meanPre, meanPost) {
       ${hasPost ? `<path class="sp-post" d="${polyPath(meanPost)}"/>` : ''}
       ${SPECTRUM_BANDS.map((b, i) => {
         const t = (i / N) * 2 * Math.PI - Math.PI / 2;
-        return `<text class="sp-label" x="${cx + Math.cos(t)*(R+14)}" y="${cy + Math.sin(t)*(R+14)}">${b}</text>`;
+        return `<text class="sp-label" x="${cx + Math.cos(t)*(R+10)}" y="${cy + Math.sin(t)*(R+10)}">${b}</text>`;
       }).join('')}
     </svg>`;
-}
-function indexLine(label, valPre, valPost) {
-  const d = valPost - valPre;
-  const sign = d > 0 ? '▲' : d < 0 ? '▼' : '·';
-  const col  = d > 0 ? '#c76340' : d < 0 ? '#8caf82' : '#cfbe98';
-  return `<span style="display:inline-block;width:80px;">${label}</span>` +
-         `<span style="color:#cfbe98;">${valPre.toFixed(2)} → ${valPost.toFixed(2)}</span>` +
-         `<span style="color:${col};margin-left:6px;">${sign}${Math.abs(d).toFixed(2)}</span>`;
 }
 function showSpectrumPanel(cmeta) {
   const panel = document.getElementById('spectrum-panel');
   if (!panel) return;
+  const lineEl = document.getElementById('sp-line');
+  const svgEl  = document.getElementById('sp-svg');
+  // Radar scaffold always rendered; polygons swap with cmeta state.
+  svgEl.innerHTML = spectrumRadarSVG(cmeta && cmeta.mean_pre, cmeta && cmeta.mean_post);
   if (!cmeta) {
-    document.getElementById('sp-head').textContent = 'Spectrum';
-    document.getElementById('sp-meta').textContent = 'hover a dot to inspect';
-    // Always render the radar scaffold (axes + grid + band labels) —
-    // only the polygons disappear when no cluster is active.
-    document.getElementById('sp-svg').innerHTML = spectrumRadarSVG(null, null);
-    document.getElementById('sp-indices').innerHTML = '';
-    panel.classList.add('visible');
-    return;
+    lineEl.innerHTML =
+      `<span class="sw" style="background:#8caf82;"></span>pre` +
+      `<span class="sw" style="background:#c76340;"></span>post`;
+  } else {
+    lineEl.innerHTML = `c${cmeta.id} · ${cmeta.tag} · mag ${cmeta.mag.toFixed(2)}`;
   }
-  document.getElementById('sp-head').textContent = `cluster c${cmeta.id} · ${cmeta.tag}`;
-  document.getElementById('sp-meta').innerHTML =
-    `mag ${cmeta.mag.toFixed(3)} &nbsp; slope ${cmeta.slope_med != null ? cmeta.slope_med.toFixed(1)+'°' : '—'}` +
-    ` &nbsp; peak ${cmeta.year_peak}`;
-  document.getElementById('sp-svg').innerHTML = spectrumRadarSVG(cmeta.mean_pre, cmeta.mean_post);
-  const ndviPre  = nd(cmeta.mean_pre,  'B08', 'B04');
-  const ndviPost = nd(cmeta.mean_post, 'B08', 'B04');
-  const gndwiPre  = nd(cmeta.mean_pre,  'B03', 'B11');
-  const gndwiPost = nd(cmeta.mean_post, 'B03', 'B11');
-  const nbrPre   = nd(cmeta.mean_pre,  'B08', 'B12');
-  const nbrPost  = nd(cmeta.mean_post, 'B08', 'B12');
-  document.getElementById('sp-indices').innerHTML =
-    `<div style="margin-top:6px;font-size:10.5px;line-height:1.55;">` +
-      `<div>${indexLine('NDVI',  ndviPre,  ndviPost)}</div>` +
-      `<div>${indexLine('gNDWI', gndwiPre, gndwiPost)}</div>` +
-      `<div>${indexLine('NBR',   nbrPre,   nbrPost)}</div>` +
-    `</div>`;
   panel.classList.add('visible');
 }
 function hideSpectrumPanel() {
