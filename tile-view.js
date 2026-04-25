@@ -77,11 +77,11 @@
   // ── Per-tile pixel streaming ──────────────────────────────────────
   // Why this exists: the full 2-of-3 detection set is ~2 GB. Loading it all
   // up front would stall the page and blow mobile memory. We chunk it into
-  // 0.1° × 0.1° binary tiles (see 22_chunk_tiles.py) and fetch only the
+  // 0.1° × 0.1° binary tiles (see 09_chunk_tiles.py) and fetch only the
   // tiles that intersect the current viewport, above a zoom threshold where
   // per-pixel detail makes sense. Below that threshold we fall back to
   // the H3 hex aggregate (rendered from `points`).
-  const TILE_BIN_DEG    = 0.1;                  // matches 22_chunk_tiles.py
+  const TILE_BIN_DEG    = 0.1;                  // matches 09_chunk_tiles.py
   const TILE_GRID_COLS  = 65;                   // Sarawak bbox widths
   const TILE_GRID_ROWS  = 42;
   const TILE_LON_MIN    = 109.5;
@@ -640,7 +640,7 @@
     }
 
     // Per-cluster colour — the palette in CLUSTER_META is built in
-    // 07_labeled_webviz.py: within each tag, shades are rank-assigned by
+    // 07_cluster_meta_refresh.py: within each tag, shades are rank-assigned by
     // cluster size (deforest: crimson → tan ramp; regrowth: deep green →
     // yellow). Keeping the variation because different spectral regimes
     // within "deforestation" represent different physical events
@@ -677,7 +677,7 @@
       // ── Per-pixel labelled layer — stream .bin tiles on demand ──────
       // Each tile has 6 B/pixel (dx, dy, yr, cl). cl = HDBSCAN cluster id
       // propagated to the full 643M set (see 08_propagate_labels.py +
-      // 10_chunk_labeled_tiles.py). Outliers carry cl=255 and render in
+      // 09_chunk_tiles.py). Outliers carry cl=255 and render in
       // a neutral shade so their spatial context is still visible.
       loadBinManifest();
       const hiddenTags = window._state && window._state.hiddenCats;
@@ -730,7 +730,7 @@
       ctx.globalAlpha = 1;
     } else {
       // ── Hex layer (coarse or fine depending on zoom) ────────────────
-      // Both coarse and fine arrive pre-classified (11_rebuild_labeled_hexes.py):
+      // Both coarse and fine arrive pre-classified (08_rebuild_hexes.py):
       // per-hex `tag` from the full 643M map. We filter to deforest-dominant
       // hexes so the layer stays semantically "this is where canopy was lost"
       // rather than a generic change-heatmap.

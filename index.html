@@ -175,7 +175,7 @@
   .cat-chip .lbl { flex: 1; }
   .cat-chip .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #cfbe98; }
   .cat-chip.off { opacity: 0.35; }
-  /* Coolwarm cluster-tag palette — matches 07_labeled_webviz.py output. */
+  /* Coolwarm cluster-tag palette — matches 07_cluster_meta_refresh.py output. */
   .cat-chip.deforest .sw { background: #b73a3a; color: #b73a3a; }
   .cat-chip.regrowth .sw { background: #2e7a3a; color: #2e7a3a; }
   .cat-chip.mixed    .sw { background: #8a7a60; color: #8a7a60; }
@@ -1077,7 +1077,7 @@ let globe;
 //   SARAWAK_HEXES_COARSE  — H3 res 7 (~28k hexes, always loaded)
 //   SARAWAK_HEXES_FINE    — H3 res 8 (~188k hexes, lazy at close zoom)
 //   .bin tiles (tile-view) — 643M per-pixel labels, 0.1°×0.1° streaming
-// Both hex files arrive pre-classified by 11_rebuild_labeled_hexes.py
+// Both hex files arrive pre-classified by 08_rebuild_hexes.py
 // (each hex carries cluster_id, tag, deforest_n already computed from
 // the full 643M map). CLUSTER_META turns cluster id → paint colour.
 let SARAWAK_HEXES_COARSE = null;
