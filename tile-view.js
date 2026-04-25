@@ -774,6 +774,7 @@
     setPoints(arr) { points = arr; draw(); },
     setHighlight(p) { highlight = p; draw(); },
     isOpen: () => opened,
+    getZoom: () => zoom,
     refresh: () => draw(),
     // Programmatic pan — dx/dy in screen pixels. Positive dx moves the view
     // right (i.e. the map content shifts left); positive dy moves it down.
