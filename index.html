@@ -752,7 +752,7 @@
     display: flex; align-items: center; justify-content: center;
     flex-direction: column; gap: 18px;
     background: #0a0806;
-    transition: opacity 0.8s ease;
+    transition: opacity 0.30s ease;   /* was 0.8s — that felt laggy */
   }
   #loader.gone { opacity: 0; pointer-events: none; }
   #loader .ring {
@@ -1095,18 +1095,21 @@ console.log('[boot] starting fetches');
 // Using `let` here threw at boot and silently broke every downstream
 // initialiser (chip handlers, flow panel, place-search, …).
 var _dataReady = false;
+function _dismissLoader() {
+  const loaderEl = document.getElementById('loader');
+  if (loaderEl) loaderEl.classList.add('gone');
+  if (!_dataReady) {
+    const pill = document.getElementById('data-pill');
+    if (pill) pill.classList.add('show');
+  }
+}
+// Hard max-timeout on the loading curtain — even if Globe.init's onReady
+// somehow doesn't fire (slow procedural texture, hardware issue, JS race),
+// the curtain dismisses on its own at 1.5 s.  The render loop keeps
+// running underneath; once the globe paints, it pops in.
+setTimeout(_dismissLoader, 1500);
 globe = Globe.init(document.getElementById('globe-mount'), {
-  onReady: () => {
-    const loaderEl = document.getElementById('loader');
-    if (loaderEl) loaderEl.classList.add('gone');
-    // As soon as the globe is on screen, surface the secondary status
-    // pill so users see "yes, more is loading" rather than "is anything
-    // happening?".  Hidden by boot() once setPoints lands.
-    if (!_dataReady) {
-      const pill = document.getElementById('data-pill');
-      if (pill) pill.classList.add('show');
-    }
-  },
+  onReady: _dismissLoader,
 });
 function hideDataPill() {
   const pill = document.getElementById('data-pill');

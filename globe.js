@@ -157,10 +157,16 @@
     tryNext(0);
   }
 
-  // Procedural earthy painting — not a photo, but clearly a globe with Borneo
-  // positioned correctly so the user sees where they are.
-  function makeFallbackTex() {
-    const W = 2048, H = 1024;
+  // Procedural earthy painting — not a photo, but clearly a globe with
+  // Borneo positioned correctly so the user sees where they are.  Sized
+  // 1024×512 (was 2048×1024) since this only shows for a fraction of a
+  // second before the CDN texture upgrades it; halving each axis cuts
+  // the canvas allocation + paint cost by 4×.  Noise pass is gated by
+  // the `noise` flag — disabled here because the 2 M-pixel for-loop
+  // ate ~1-3 s on weaker hardware and is invisible at this resolution
+  // anyway.
+  function makeFallbackTex(noise = false) {
+    const W = 1024, H = 512;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const ctx = c.getContext('2d');
 
@@ -256,16 +262,20 @@
     ctx.fillStyle = rg;
     ctx.fillRect(sx - 40, sy - 40, 80, 80);
 
-    // Soft noise — very low amplitude so it reads as paper/terrain rather than TV static.
-    const img = ctx.getImageData(0, 0, W, H);
-    const d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const n = (Math.random() - 0.5) * 10;
-      d[i]   = Math.max(0, Math.min(255, d[i]   + n));
-      d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
-      d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+    // Optional soft-noise pass — gated off by default since it costs
+    // 1-3 s on weaker hardware (2 M-pixel for-loop) and is barely
+    // visible at the 0.5-second life span of the procedural texture.
+    if (noise) {
+      const img = ctx.getImageData(0, 0, W, H);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const n = (Math.random() - 0.5) * 10;
+        d[i]   = Math.max(0, Math.min(255, d[i]   + n));
+        d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+        d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+      }
+      ctx.putImageData(img, 0, 0);
     }
-    ctx.putImageData(img, 0, 0);
 
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
