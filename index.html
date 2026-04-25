@@ -1032,6 +1032,25 @@ function boot() {
   }
   window._GROUPS = GROUPS;
   window._GROUP_OF = GROUP_OF;
+
+  // Per-pixel dot colours. Sync cluster.color in CLUSTER_META to the
+  // chip-group swatch so toggling a chip moves the dots that match its
+  // colour.  Without this, cluster.color (set by Stage 6 against a
+  // different ranking) is randomly distributed across chips — e.g. c4
+  // paints deep red but lives in the Moderate chip, so toggling
+  // Moderate makes deep-red dots vanish (which the user reads as a
+  // bug).  Topo + non-deforest cluster colours are zeroed defensively
+  // so a filter regression can't leak the wrong shade.
+  const CHIP_COLOR = {
+    severe:   '#c65438',     // chip swatch (HTML)
+    heavy:    '#d46d45',
+    moderate: '#e7b27e',
+  };
+  for (const c of CLUSTER_META.clusters) {
+    const g = GROUP_OF[c.id];
+    if (g && CHIP_COLOR[g]) c.color = CHIP_COLOR[g];
+    else c.color = 'rgba(0,0,0,0)';   // topo / mixed / outside any chip
+  }
   // Per-group hidden state. Clicking a chip toggles the whole group.
   const hiddenGroups = new Set();
   const hiddenClusters = new Set();        // derived from hiddenGroups
