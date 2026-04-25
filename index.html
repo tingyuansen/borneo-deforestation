@@ -1559,8 +1559,11 @@ function nd(spectrum, a, b) {
   const x = spectrum[BIDX[a]], y = spectrum[BIDX[b]];
   return (x - y) / (x + y || 1);
 }
+// Render the radar always — axes, grid, band labels.  Polygons are
+// optional: passing null/undefined for either spectrum draws just the
+// scaffold, so the panel stays visually stable as the cursor moves
+// between hits and misses.
 function spectrumRadarSVG(meanPre, meanPost) {
-  if (!meanPre || !meanPost || meanPre.length !== 10 || meanPost.length !== 10) return '';
   const W = 200, H = 200, cx = W/2, cy = H/2, R = 72;
   const N = 10;
   const pt = (i, val) => {
@@ -1570,6 +1573,8 @@ function spectrumRadarSVG(meanPre, meanPost) {
   };
   const polyPath = (vals) => 'M' + vals.map((v, i) => pt(i, v).join(',')).join('L') + 'Z';
   const ringR = [0.2, 0.5, 1.0].map(f => R * f);
+  const hasPre  = meanPre  && meanPre.length === 10;
+  const hasPost = meanPost && meanPost.length === 10;
   return `
     <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
       ${ringR.map(r => `<circle class="sp-grid" cx="${cx}" cy="${cy}" r="${r}"/>`).join('')}
@@ -1577,8 +1582,8 @@ function spectrumRadarSVG(meanPre, meanPost) {
         const [x, y] = pt(i, SPECTRUM_RMAX);
         return `<line class="sp-axis" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}"/>`;
       }).join('')}
-      <path class="sp-pre"  d="${polyPath(meanPre)}"/>
-      <path class="sp-post" d="${polyPath(meanPost)}"/>
+      ${hasPre  ? `<path class="sp-pre"  d="${polyPath(meanPre)}"/>`  : ''}
+      ${hasPost ? `<path class="sp-post" d="${polyPath(meanPost)}"/>` : ''}
       ${SPECTRUM_BANDS.map((b, i) => {
         const t = (i / N) * 2 * Math.PI - Math.PI / 2;
         return `<text class="sp-label" x="${cx + Math.cos(t)*(R+14)}" y="${cy + Math.sin(t)*(R+14)}">${b}</text>`;
@@ -1599,7 +1604,9 @@ function showSpectrumPanel(cmeta) {
   if (!cmeta) {
     document.getElementById('sp-head').textContent = 'Spectrum';
     document.getElementById('sp-meta').textContent = 'hover a dot to inspect';
-    document.getElementById('sp-svg').innerHTML = '';
+    // Always render the radar scaffold (axes + grid + band labels) —
+    // only the polygons disappear when no cluster is active.
+    document.getElementById('sp-svg').innerHTML = spectrumRadarSVG(null, null);
     document.getElementById('sp-indices').innerHTML = '';
     panel.classList.add('visible');
     return;
@@ -1852,15 +1859,16 @@ function openTileView() {
     // Spectrum panel update on hover.  Only meaningful in the per-pixel
     // (symbol) view: at hex zoom the picked hex carries a *dominant*
     // cluster_id but the area covers many clusters, so showing one
-    // archetype is misleading.
+    // archetype is misleading.  Radar scaffold stays visible always —
+    // only the polygons swap in/out as the cursor crosses dots.
     onHover: (p, e) => {
       const PIXEL_ZOOM = 12;
       const z = (window.TileView && window.TileView.getZoom) ? window.TileView.getZoom() : 0;
-      if (z < PIXEL_ZOOM) { showSpectrumPanel(null); return; }   // hex view → reset to default state
-      if (!p || p.cluster_id == null) return;                     // nothing under cursor → keep last
+      if (z < PIXEL_ZOOM) { showSpectrumPanel(null); return; }   // hex view → empty radar
+      if (!p || p.cluster_id == null) { showSpectrumPanel(null); return; }
       const cmeta = CLUSTER_META && CLUSTER_META.clusters &&
         CLUSTER_META.clusters[p.cluster_id];
-      if (!cmeta) return;
+      if (!cmeta) { showSpectrumPanel(null); return; }
       showSpectrumPanel(cmeta);
     },
     onClick: (p, e) => {

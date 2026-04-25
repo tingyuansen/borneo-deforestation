@@ -387,7 +387,12 @@
         if (hoverRaf) return;
         hoverRaf = requestAnimationFrame(() => {
           hoverRaf = null;
-          const p = pick(hoverEvt.clientX, hoverEvt.clientY);
+          // At per-pixel zoom, prefer the per-pixel pick (looks up the
+          // .bin tile dot under the cursor — gives the actual pixel's
+          // cluster_id, not the hex's dominant). Fall back to hex pick
+          // at lower zoom or if the per-pixel pick misses.
+          let p = (zoom >= PIXEL_SWITCH_PICK) ? pickPixel(hoverEvt.clientX, hoverEvt.clientY) : null;
+          if (!p) p = pick(hoverEvt.clientX, hoverEvt.clientY);
           if (onHover) onHover(p, hoverEvt);
         });
         hoverEvt = e;
@@ -453,6 +458,52 @@
       if (dd < bestD) { bestD = dd; best = p; }
     }
     return best;
+  }
+
+  // Per-pixel pick — at high zoom, find the dot in the .bin tile
+  // under the cursor. Returns a synthetic point object compatible
+  // with the rest of the pick callers, including cluster_id so the
+  // spectrum panel can resolve it via CLUSTER_META[cid].
+  const PIXEL_SWITCH_PICK = 12;
+  const PICK_PIXEL_RADIUS = 14;   // search radius in screen pixels
+  function pickPixel(clientX, clientY) {
+    if (!binManifest) return null;
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left, my = clientY - rect.top;
+    const [lon, lat] = pixelToLonLat(mx, my);
+    // Locate the .bin tile that contains (lon, lat).
+    const ix = Math.floor((lon - TILE_LON_MIN) / TILE_BIN_DEG);
+    const iy = Math.floor((lat - TILE_LAT_MIN) / TILE_BIN_DEG);
+    if (ix < 0 || ix >= TILE_GRID_COLS || iy < 0 || iy >= TILE_GRID_ROWS) return null;
+    const key = `iy${iy}_ix${ix}`;
+    const tile = binCache.get(key);
+    if (!tile) return null;            // not loaded — fall through
+    const { n, lonMin, latMin, dx, dy, cl, yr } = tile;
+    const tileInvScale = TILE_BIN_DEG / 65535;
+    const cx = lon2x(center[0], zoom), cy = lat2y(center[1], zoom);
+    const halfW = W/2, halfH = H/2;
+    const r2max = PICK_PIXEL_RADIUS * PICK_PIXEL_RADIUS;
+    let bestD = r2max, bestI = -1;
+    // Linear scan; tiles top out around 1 M pixels which is a few ms.
+    for (let i = 0; i < n; i++) {
+      if (cl[i] === 255) continue;       // outliers don't paint, skip pick
+      const plon = lonMin + dx[i] * tileInvScale;
+      const plat = latMin + dy[i] * tileInvScale;
+      const sx = lon2x(plon, zoom) - cx + halfW;
+      const sy = lat2y(plat, zoom) - cy + halfH;
+      const ddx = sx - mx, ddy = sy - my;
+      const dd = ddx*ddx + ddy*ddy;
+      if (dd < bestD) { bestD = dd; bestI = i; }
+    }
+    if (bestI < 0) return null;
+    const plon = lonMin + dx[bestI] * tileInvScale;
+    const plat = latMin + dy[bestI] * tileInvScale;
+    return {
+      lon: plon, lat: plat,
+      cluster_id: cl[bestI],
+      y: 2015 + yr[bestI],
+      layer: 'pixel',
+    };
   }
 
   // ── Render ─────────────────────────────────────────────────────────
