@@ -17,8 +17,6 @@
      stream the dots in. -->
 <link rel="preload" as="fetch" type="application/json" crossorigin
       href="data/sarawak_cluster_meta.json">
-<link rel="preload" as="fetch" type="application/json" crossorigin
-      href="data/manifest.json">
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <script src="https://unpkg.com/h3-js@4.1.0"></script>
@@ -1081,7 +1079,6 @@ window.hexDensityColor = hexDensityColor;
     : 'data/';
 }
 const P = name => window.DATA_BASE + name;
-let MANIFEST;
 let globe;
 
 // Detection data is served in three tiers so the client only pays for
@@ -1154,13 +1151,11 @@ function tagHexesInSarawak(arr) {
 }
 
 Promise.all([
-  fetch(P('manifest.json')).then(r=>r.json()),
   fetch(P('sarawak_hexes_2of3_res7.json')).then(r=>r.json())
     .catch(e => { console.warn('[boot] hex res7 fetch failed', e); return null; }),
   fetch(P('sarawak_cluster_meta.json')).then(r=>r.json())
     .catch(e => { console.warn('[boot] cluster meta fetch failed', e); return null; }),
-]).then(([manifest, hexCoarse, clusterMeta]) => {
-  MANIFEST = manifest;
+]).then(([hexCoarse, clusterMeta]) => {
   // Tag each hex once with _inSarawak so render + filter loops can short-
   // circuit the polygon check (which costs ~1100 ops/call across 14 rings).
   // Without this we'd pay 45K × 1100 = 50M ops per coarse-render frame.
