@@ -1,6 +1,6 @@
 # Borneo, in pixels
 
-Interactive dashboard accompanying Ting & Moortgat (2026), *Most canopy disturbance in Sarawak is partial, widespread, and invisible to global forest-change products: evidence from a calibrated 10 m Sentinel-2 archive (2015–2024)*, submitted to *Remote Sensing of Environment*.
+Interactive dashboard accompanying Ting & Moortgat, *Most canopy disturbance in Sarawak is partial, widespread, and invisible to global forest-change products: evidence from a calibrated 10 m Sentinel-2 archive (2015–2024)*.
 
 Each detection on the map is a Sentinel-2 pixel (10 m × 10 m) that flipped between 2015 and 2024. The dashboard lets you rotate the globe, fly into Sarawak, scrub the timeline, toggle clearing-type chips, and zoom from regional rollups to per-pixel detail.
 
@@ -20,7 +20,7 @@ Paper repo (pipeline + reproducibility): <https://github.com/tingyuansen/sentine
 - Three-tier level of detail tied to zoom:
   - `zoom < 10`  → res-7 hex layer (≈ 46 k hexes).
   - `10 ≤ zoom < 12`  → res-8 fine hexes (≈ 293 k, lazy-loaded once).
-  - `zoom ≥ 12`  → per-pixel dots streamed from `data/tiles/2of3/tile_iy*_ix*.bin`.
+  - `zoom ≥ 12`  → per-pixel dots streamed from `data/tiles/tile_iy*_ix*.bin`.
 - Pale-yellow hex backdrop paints under the coloured detection layer, so the grid is present even when the year filter hides all coloured hexes.
 - Before/after slider clips the detection overlay to the right of the handle; the histogram counts only what is still visible.
 
@@ -41,11 +41,11 @@ All files live under `data/`:
 | --- | --- | --- |
 | `manifest.json` | < 1 kB | Top-level region + rule metadata. |
 | `sarawak_cluster_meta.json` | 17 kB | 22 HDBSCAN clusters with `id`, `n`, `year_hist`, `mean_pre`, `mean_post`. |
-| `sarawak_hexes_2of3_res7.json` | 8.3 MB | 45 745 coarse hexes for the globe layer. |
-| `sarawak_hexes_2of3_res8.json` | 53 MB | 293 324 fine hexes for mid-zoom (lazy-loaded). |
+| `sarawak_hexes_res7.json` | 8.3 MB | 45 745 coarse hexes for the globe layer. |
+| `sarawak_hexes_res8.json` | 53 MB | 293 324 fine hexes for mid-zoom (lazy-loaded). |
 | `pca_flow_sample.json` | 145 kB | 1500 stratified PC-space pixel samples for the flow-tube visualisation. |
-| `tiles/2of3/manifest.json` | 200 kB | Per-tile pixel-count index. |
-| `tiles/2of3/tile_iy*_ix*.bin` | 2.6 GB (2378 files) | 0.1° × 0.1° binary pixel tiles. Each file encodes `n:u32` + `lon_min,lat_min:f32` + `dx:u16[n] \| dy:u16[n] \| year:u8[n] \| cluster_id:u8[n]`. `cluster_id == 255` marks outliers. |
+| `tiles/manifest.json` | 200 kB | Per-tile pixel-count index. |
+| `tiles/tile_iy*_ix*.bin` | 2.2 GB (1707 files) | 0.1° × 0.1° binary pixel tiles. Each file encodes `n:u32` + `lon_min,lat_min:f32` + `dx:u16[n] \| dy:u16[n] \| year:u8[n] \| cluster_id:u8[n]`. `cluster_id == 255` marks outliers. |
 
 The full 643 M-pixel detection set is the `.bin` tiles. Hex JSONs are pre-aggregated rollups for fast low-zoom rendering.
 
@@ -79,7 +79,7 @@ borneo-deforestation/
 
 ## Deployment
 
-GitHub Pages serves the repo contents verbatim at the live-demo URL. The `.bin` tile directory (2.6 GB) exceeds GitHub's size guidance; if it is not committed, the site still renders the globe and hex layers, but the per-pixel layer (`zoom ≥ 12`) is empty. Upload the `tiles/` tree to a CDN (or enable Git LFS with a paid bandwidth tier) and point `BIN_BASE` in `tile-view.js` at it to re-enable the pixel layer.
+GitHub Pages serves the repo contents verbatim at the live-demo URL. The `.bin` tile directory (2.2 GB) exceeds GitHub's size guidance; if it is not committed, the site still renders the globe and hex layers, but the per-pixel layer (`zoom ≥ 12`) is empty. Upload the `tiles/` tree to a CDN (or enable Git LFS with a paid bandwidth tier) and point `BIN_BASE` in `tile-view.js` at it to re-enable the pixel layer.
 
 ## Data provenance
 

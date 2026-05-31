@@ -1152,7 +1152,7 @@ function tagHexesInSarawak(arr) {
 }
 
 Promise.all([
-  fetch(P('sarawak_hexes_2of3_res7.json')).then(r=>r.json())
+  fetch(P('sarawak_hexes_res7.json')).then(r=>r.json())
     .catch(e => { console.warn('[boot] hex res7 fetch failed', e); return null; }),
   fetch(P('sarawak_cluster_meta.json')).then(r=>r.json())
     .catch(e => { console.warn('[boot] cluster meta fetch failed', e); return null; }),
@@ -1179,7 +1179,7 @@ Promise.all([
 let _finePending = null;
 function ensureFineHexes() {
   if (window.SARAWAK_HEXES_FINE || _finePending) return _finePending;
-  _finePending = fetch(P('sarawak_hexes_2of3_res8.json'))
+  _finePending = fetch(P('sarawak_hexes_res8.json'))
     .then(r => r.json()).then(x => {
       tagHexesInSarawak(x);                  // see boot path comment above
       SARAWAK_HEXES_FINE = x;

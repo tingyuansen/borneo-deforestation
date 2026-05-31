@@ -144,7 +144,7 @@
   // like no data here" complaints.
   const DATA_BASE = (typeof window !== 'undefined' && window.DATA_BASE)
     || 'https://storage.googleapis.com/borneo-deforestation-data/data/';
-  const BIN_BASE     = DATA_BASE + 'tiles/2of3/';
+  const BIN_BASE     = DATA_BASE + 'tiles/';
   const MANIFEST_URL = BIN_BASE + 'manifest.json';
   let   binManifest     = null;                 // { tiles: { iy_ix: {...} } }
   const binCache        = new Map();            // key → { dx, dy, yr, n, lonMin, latMin }
