@@ -1340,18 +1340,18 @@ function boot() {
                       ha.toFixed(0) + ' ha';
   window._fmtHa = fmtHa;
   // Chip totals computed from the Sarawak-clipped coarse hex data, NOT
-  // from CLUSTER_META.clusters[id].n directly — cluster.n includes
-  // Brunei/Sabah/Kalimantan pixels that the bbox spills into. Aggregating
-  // over inSarawak hexes drops those, so chip totals reconcile with the
-  // "In view" hectare readout at full zoom-out.
+  // from CLUSTER_META.clusters[id].n — that includes Brunei/Sabah/
+  // Kalimantan pixels that the bbox spills into. Each hex carries
+  // n_canopy / n_bare_soil / n_wet_substrate as exact per-pixel sums
+  // (each pixel attributed to its own cluster's chip group), so the
+  // chip totals reconcile with the paper's raw per-chip pixel counts.
   function refreshChipCounts() {
-    const totals = {};
-    for (const g of Object.keys(GROUPS)) totals[g] = 0;
+    const totals = { bare_soil: 0, canopy: 0, wet_substrate: 0 };
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
       if (h._inSarawak === false) continue;
-      const grp = GROUP_OF[h.cluster_id];
-      if (!grp || !(grp in totals)) continue;
-      totals[grp] += h.deforest_n || 0;
+      totals.bare_soil     += h.n_bare_soil     || 0;
+      totals.canopy        += h.n_canopy        || 0;
+      totals.wet_substrate += h.n_wet_substrate || 0;
     }
     for (const g of Object.keys(totals)) {
       const el = document.getElementById(`ct-${g}`);
@@ -1640,10 +1640,12 @@ function drawHistogram() {
     }
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
       if (h._inSarawak === false) continue;
-      const grp = GROUP_OF[h.cluster_id];
-      if (!grp || !(grp in yt[YEAR_LO])) continue;
       const yy = h.y;
-      if (yt[yy] != null) yt[yy][grp] = (yt[yy][grp] || 0) + (h.deforest_n || 0);
+      const row = yt[yy];
+      if (!row) continue;
+      row.bare_soil     = (row.bare_soil     || 0) + (h.n_bare_soil     || 0);
+      row.canopy        = (row.canopy        || 0) + (h.n_canopy        || 0);
+      row.wet_substrate = (row.wet_substrate || 0) + (h.n_wet_substrate || 0);
     }
     return yt;
   }
