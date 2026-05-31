@@ -6,7 +6,7 @@ Each detection on the map is a Sentinel-2 pixel (10 m × 10 m) that flipped betw
 
 Live demo: <https://tingyuansen.github.io/borneo-deforestation/>
 
-Paper repo (pipeline + reproducibility): <https://github.com/tingyuansen/Sentinel_Sarawak>
+Paper repo (pipeline + reproducibility): <https://github.com/tingyuansen/sentinel-sarawak>
 
 ## What you see
 
@@ -85,7 +85,7 @@ GitHub Pages serves the repo contents verbatim at the live-demo URL. The `.bin` 
 
 All change-detection data is derived from the [ESA/Copernicus Sentinel-2](https://sentiwiki.copernicus.eu/web/s2-mission) open-data archive. Satellite basemap tiles in the tile view come from [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9). Blue Marble globe texture via [three-globe](https://github.com/vasturiano/three-globe).
 
-The upstream detection, clustering, and calibration pipeline lives in <https://github.com/tingyuansen/Sentinel_Sarawak>; the artefacts checked into `data/` here are its frozen outputs. The full per-pixel archive (≈ 3.7 GB) is released as a Zenodo bundle (DOI at publication time).
+The upstream detection, clustering, and calibration pipeline lives in <https://github.com/tingyuansen/sentinel-sarawak>; the artefacts checked into `data/` here are its frozen outputs. The full per-pixel archive (≈ 3.7 GB) is released as a Zenodo bundle (DOI at publication time).
 
 ## Citation
 
