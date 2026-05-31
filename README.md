@@ -89,7 +89,32 @@ The upstream detection, clustering, and calibration pipeline lives in <https://g
 
 ## Citation
 
-If you use the dashboard or its data, please cite the paper and the Zenodo DOI.
+If you use the dashboard or its data, please cite both the paper and the Zenodo bundle.
+
+**Paper** (preprint at arXiv: arXiv:XXXX.XXXXX — to be filled in once the arXiv ID is assigned):
+
+```bibtex
+@article{TingMoortgat2026sarawak,
+  author  = {Ting, Yuan-Sen and Moortgat, Joachim},
+  title   = {Most canopy disturbance in {Sarawak} is partial, widespread, and invisible to global forest-change products: evidence from a calibrated 10\,m {Sentinel-2} archive (2015--2024)},
+  year    = {2026},
+  eprint  = {XXXX.XXXXX},
+  archivePrefix = {arXiv},
+}
+```
+
+**Per-pixel archive** (Zenodo):
+
+```bibtex
+@dataset{TingMoortgat2026sarawak_data,
+  author    = {Ting, Yuan-Sen and Moortgat, Joachim},
+  title     = {Per-pixel canopy-disturbance archive for {Sarawak} (Malaysia) from {Sentinel-2 Level-2A}, 2015--2024},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.20471028},
+  url       = {https://doi.org/10.5281/zenodo.20471028},
+}
+```
 
 ## License
 
