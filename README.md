@@ -85,7 +85,7 @@ GitHub Pages serves the repo contents verbatim at the live-demo URL. The `.bin` 
 
 All change-detection data is derived from the [ESA/Copernicus Sentinel-2](https://sentiwiki.copernicus.eu/web/s2-mission) open-data archive. Satellite basemap tiles in the tile view come from [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9). Blue Marble globe texture via [three-globe](https://github.com/vasturiano/three-globe).
 
-The upstream detection, clustering, and calibration pipeline lives in <https://github.com/tingyuansen/sentinel-sarawak>; the artefacts checked into `data/` here are its frozen outputs. The full per-pixel archive (≈ 3.7 GB) is released as a Zenodo bundle (DOI at publication time).
+The upstream detection, clustering, and calibration pipeline lives in <https://github.com/tingyuansen/sentinel-sarawak>; the artefacts checked into `data/` here are its frozen outputs. The full per-pixel archive (≈ 3.7 GB) is released as a Zenodo bundle, [`10.5281/zenodo.20471028`](https://doi.org/10.5281/zenodo.20471028).
 
 ## Citation
 
