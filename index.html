@@ -938,8 +938,8 @@
   <!-- Three chips by physical clearing type, partitioned from the
        cluster's reconstructed canonical Δ-color (Δ-NDVI / Δ-gNDWI /
        Δ-NBR computed at boot from cluster_meta.mean_pre / mean_post).
-       Topographic-illumination clusters (topo_flag) and clusters
-       without a real ΔNDVI drop are excluded entirely. -->
+       Clusters without a real ΔNDVI drop are excluded entirely
+       (ΔNDVI > -0.05 → "other"). Matches the paper's chip rule. -->
   <div class="cat-chip deforest" data-group="bare_soil">
     <span class="sw" style="background:#9d6f3a;"></span>
     <span class="lbl">Bare-soil clearing</span>
@@ -1195,26 +1195,23 @@ window._ensureFineHexes = ensureFineHexes;
 let DOT_SIZE_MODE = 'recency';  // 'recency' | 'uniform'
 
 function buildPoints() {
-  // Globe hex layer.  v3 single cohort: real-deforest hexes inside the
-  // GADM Sarawak boundary, with topo-flagged clusters dropped at filter
-  // time. Everything else is excluded — no v1-era 'flagged' / 'regrowth'
-  // / 'mountain' cohorts.
+  // Globe hex layer. Hexes inside the GADM Sarawak boundary whose
+  // dominant cluster is one of the 18 chip-mapped clusters (bare-soil,
+  // canopy, or wet-substrate per the paper's Δ-NDVI / Δ-gNDWI / Δ-NBR
+  // rule). The 4 "other" clusters (Δ-NDVI > -0.05) drop out via
+  // GROUP_OF membership.
   const hexSource = SARAWAK_HEXES_COARSE;
   if (!hexSource || !hexSource.length) return [];
   // Chip-hidden clusters drop out of the ranked set entirely, so the
   // warm-to-crimson density ramp recalibrates over just the currently-
-  // shown clusters (toggling "Severe" off leaves the rest spanning the
-  // ramp, which reads as "the remaining clusters are still meaningful").
+  // shown clusters.
   const hiddenClusters = (window._state && window._state.hiddenClusters)
     || new Set();
-  const _byId = Object.fromEntries(
-    (CLUSTER_META?.clusters || []).map(c => [c.id, c]));
+  const GROUP_OF = window._GROUP_OF || {};
   const visible = [];
   for (const h of hexSource) {
     if ((h.n || 0) === 0) continue;
-    if (h.tag !== 'deforest') continue;
-    const cmeta = _byId[h.cluster_id];
-    if (!cmeta || cmeta.topo_flag) continue;
+    if (!(h.cluster_id in GROUP_OF)) continue;
     if (h._inSarawak === false) continue;     // cached at load time
     if (hiddenClusters.has(h.cluster_id)) continue;   // chip toggle
     visible.push(h);
@@ -1249,38 +1246,21 @@ function boot() {
   // populate the detections layer + wire all data-dependent UI.
   const pillEl = document.getElementById('data-pill');
   if (pillEl) pillEl.textContent = `Indexing ${SARAWAK_HEXES_COARSE?.length || 0} detections…`;
-  globe.setPoints(buildPoints());
-  _dataReady = true;
-  hideDataPill();
-  // No more pilot bbox — the whole state is the subject now.
-  // (When we add a zoom-in detail view, it'll be centred on whichever hex the
-  //  user clicks, not hard-coded to Baram.)
-  // Expose for UI toggle
-  window._rebuildGlobePoints = () => globe.setPoints(buildPoints());
-
-  // Initial camera: full-globe view so the title + context read first.
-  // Flying in (via the Baram button or user zoom) reveals per-pixel detail.
-  globe.flyTo(114.05, 4.05, 3.2, 0);
-
-  // Pilot-era stats (hectares lost / category counts) are derived from the
-  // DATA pilot array and the stat-card DOM — both commented out in Phase 1,
-  // so nothing to update here. Restored when cluster labels are applied.
 
   // Chip groups — three categories by physical CLEARING TYPE,
   // partitioned from each cluster's reconstructed canonical Δ-color
   // (Δ-NDVI / Δ-gNDWI / Δ-NBR computed from cluster_meta.mean_pre and
-  // mean_post).  Topo-flagged clusters and clusters with no real
-  // ΔNDVI drop are excluded entirely.  Rules:
+  // mean_post). Matches the paper's chip_for_cluster rule. Rules:
   //   bare_soil      ΔNDVI ≤ -0.18, ΔgNDWI ≥ +0.15  — full canopy loss + dry surface
   //   canopy         ΔNDVI ≤ -0.10, ΔgNDWI ≥ +0.10  — typical canopy loss
   //   wet_substrate  ΔNDVI ≤ -0.10, ΔgNDWI < +0.10, ΔNBR ≤ -0.15  — clearing on damp ground
+  //   anything else (incl. ΔNDVI > -0.05)            — dropped as "other"
   const SB = ['B02','B03','B04','B05','B06','B07','B08','B8A','B11','B12'];
   const ndi = (sp, a, b) => {
     const ai = SB.indexOf(a), bi = SB.indexOf(b);
     return (sp[ai] - sp[bi]) / (sp[ai] + sp[bi] + 1e-9);
   };
   const chipOf = (c) => {
-    if (c.tag !== 'deforest' || c.topo_flag) return null;
     if (!c.mean_pre || !c.mean_post) return null;
     const d_ndvi  = ndi(c.mean_post, 'B08', 'B04') - ndi(c.mean_pre, 'B08', 'B04');
     const d_gndwi = ndi(c.mean_post, 'B03', 'B11') - ndi(c.mean_pre, 'B03', 'B11');
@@ -1300,6 +1280,14 @@ function boot() {
   for (const [g, ids] of Object.entries(GROUPS)) for (const id of ids) GROUP_OF[id] = g;
   window._GROUPS = GROUPS;
   window._GROUP_OF = GROUP_OF;
+
+  // Paint the initial globe layer now that the chip mapping is built.
+  globe.setPoints(buildPoints());
+  _dataReady = true;
+  hideDataPill();
+  window._rebuildGlobePoints = () => globe.setPoints(buildPoints());
+  // Initial camera: full-globe view so the title + context read first.
+  globe.flyTo(114.05, 4.05, 3.2, 0);
 
   // Sync cluster.color to chip-group swatch so chip toggle ↔ dot colour
   // is coherent.  Non-chip clusters get transparent so they can't leak.
@@ -1360,7 +1348,6 @@ function boot() {
     const totals = {};
     for (const g of Object.keys(GROUPS)) totals[g] = 0;
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
-      if (h.tag !== 'deforest') continue;
       if (h._inSarawak === false) continue;
       const grp = GROUP_OF[h.cluster_id];
       if (!grp || !(grp in totals)) continue;
@@ -1652,7 +1639,6 @@ function drawHistogram() {
       for (const k of TAGS) yt[y][k] = 0;
     }
     for (const h of (SARAWAK_HEXES_COARSE || [])) {
-      if (h.tag !== 'deforest') continue;
       if (h._inSarawak === false) continue;
       const grp = GROUP_OF[h.cluster_id];
       if (!grp || !(grp in yt[YEAR_LO])) continue;

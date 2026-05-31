@@ -226,10 +226,7 @@
   function buildViewportYearHist() {
     const CM = window.CLUSTER_META;
     if (!CM || !CM.clusters) return null;
-    const tagOf = (cid) => cid === 255 ? 'outlier'
-      : (CM.clusters[cid] && CM.clusters[cid].tag) || 'mixed';
-    const isTopo = (cid) =>
-      !!(CM.clusters[cid] && CM.clusters[cid].topo_flag);
+    const GROUP_OF = window._GROUP_OF || {};
     const hist = {};
     for (let y = 2015; y <= 2024; y++) hist[y] = {};
     const splitFrac = (typeof window.__baSplitX === 'number') ? window.__baSplitX : 0;
@@ -243,14 +240,10 @@
     // Chip state (hiddenClusters) is NOT applied here — the stacked
     // histogram needs full per-group totals so its y-scale stays
     // stable; renderBars hides toggled-off groups via visibility attr.
-    // Filtering here caused the "bars get fatter on toggle" issue.
-    // Filter is data-driven: deforest tag, not topo. Sarawak clip is
+    // Filter is data-driven: cluster_id must be in one of the three
+    // chip groups (paper's chip_for_cluster rule). Sarawak clip is
     // applied per-hex in the loop below.
-    const keepCid = (cid) => {
-      if (cid === 255) return false;
-      if (isTopo(cid)) return false;
-      return tagOf(cid) === 'deforest';
-    };
+    const keepCid = (cid) => cid !== 255 && (cid in GROUP_OF);
 
     if (zoom < HIST_PIXEL_SWITCH) {
       // Hex aggregate path. Each hex carries deforest_n (exact) and a
@@ -261,10 +254,8 @@
       const useFine = zoom >= HIST_HEX_FINE_SWITCH && fine && fine.length;
       // Coarse-zoom path reads SARAWAK_HEXES_COARSE directly (not the
       // globe `points` array, which strips hexes for visual reasons).
-      // Hex tags + topo_flag + Sarawak polygon do all the filtering.
-      // Include BOTH deforest- and mixed-tag hexes, Sarawak-only.
-      // The bbox spills into Brunei/Sabah/Kalimantan — those should
-      // not contribute to the "In view" hectare readout.
+      // Hexes whose dominant cluster_id is in GROUP_OF are kept; the
+      // Sarawak polygon clip drops Brunei/Sabah/Kalimantan spillover.
       let src;
       // _inSarawak is precomputed once on hex load (see index.html
       // tagHexesInSarawak) — replaces the per-frame polygon test which
@@ -272,7 +263,7 @@
       if (useFine) {
         src = [];
         for (const h of fine) {
-          if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
+          if (!(h.cluster_id in GROUP_OF)) continue;
           if (h._inSarawak === false) continue;
           src.push(h);
         }
@@ -280,7 +271,7 @@
         const coarse = window.SARAWAK_HEXES_COARSE || [];
         src = [];
         for (const h of coarse) {
-          if (h.tag !== 'deforest' && h.tag !== 'mixed') continue;
+          if (!(h.cluster_id in GROUP_OF)) continue;
           if (h._inSarawak === false) continue;
           src.push(h);
         }
@@ -297,12 +288,9 @@
         if (hist[year] == null) continue;
         const nDef = h.deforest_n != null ? h.deforest_n : h.n;
         if (!nDef) continue;
-        // For deforest-tag hexes, attribute to the dominant cluster's
-        // chip via 'c<cid>' key (downstream buildBinData maps it via
-        // GROUP_OF). For mixed-tag hexes the dominant cluster isn't in
-        // any chip, so attribute directly to 'moderate' — these are
-        // deforest-direction pixels just below the dominant-tag bar.
-        const key = (h.tag === 'mixed') ? 'moderate' : ('c' + h.cluster_id);
+        // Attribute to the dominant cluster's chip via 'c<cid>' key;
+        // downstream buildBinData maps it via GROUP_OF.
+        const key = 'c' + h.cluster_id;
         hist[year][key] = (hist[year][key] || 0) + nDef;
       }
       return hist;
@@ -644,30 +632,15 @@
     // The chip swatch shows the dominant shade; the viz shows the full
     // ramp so the user can see the sub-structure.
     const CM = window.CLUSTER_META;
+    const GROUP_OF = window._GROUP_OF || {};
     const colorOfCluster = (cid) => {
       if (CM && CM.clusters && CM.clusters[cid]) return CM.clusters[cid].color;
       return '#8a7a60';
     };
-    const tagOfCluster = (cid) => {
-      if (CM && CM.clusters && CM.clusters[cid]) return CM.clusters[cid].tag;
-      return 'mixed';
-    };
-    const isTopoCluster = (cid) =>
-      !!(CM && CM.clusters && CM.clusters[cid] && CM.clusters[cid].topo_flag);
-    // Hidden by cluster-id. Identified empirically via
-    // scripts/15_cluster_elev_audit (per-cluster elevation + slope
-    // distribution) — see sarawak/README.md §Known issues:
-    //   c2, c12, c15  tagged regrowth but sit at negative elevation
-    //                 (tidal flats / sun-glint in the sea)
-    //   c11, c16      tagged water_ward, also at sea level
-    //   c1, c9, c14   tagged deforest but median elev > 300 m, slope-p95
-    //                 above 25° → topographic-illumination false
-    //                 positives, not real canopy loss
-    // Both groups go away on the final pipeline rerun (topo correction
-    // Per-pixel filter is now data-driven (no v1-era hardcoded id lists):
+    // Per-pixel filter is data-driven:
     //   - inSarawak()         drops Brunei/Sabah/Kalimantan
-    //   - cluster.topo_flag   drops C-correction artefacts on >10° slopes
-    //   - tag === 'deforest'  the only tag we paint
+    //   - cid in GROUP_OF     drops pixels whose dominant cluster is "other"
+    //                         (Δ-NDVI > -0.05 per the paper's chip rule)
     //   - hiddenClusters      chip toggle
     if (zoom >= PIXEL_SWITCH) {
       // ── Per-pixel labelled layer — stream .bin tiles on demand ──────
@@ -706,8 +679,7 @@
         for (let i = 0; i < n; i += stride) {
           const cid = cl[i];
           if (cid === 255) continue;                 // propagation outlier
-          if (isTopoCluster(cid)) continue;          // topographic artefact
-          if (tagOfCluster(cid) !== 'deforest') continue;
+          if (!(cid in GROUP_OF)) continue;          // not a chip cluster
           if (hiddenClusters && hiddenClusters.has(cid)) continue;
           if (yr[i] < yrLoRel || yr[i] > yrHiRel) continue;
           const lon = lonMin + dx[i] * tileInvScale;
@@ -726,10 +698,9 @@
       ctx.globalAlpha = 1;
     } else {
       // ── Hex layer (coarse or fine depending on zoom) ────────────────
-      // Both coarse and fine arrive pre-classified (08_rebuild_hexes.py):
-      // per-hex `tag` from the full 643M map. We filter to deforest-dominant
-      // hexes so the layer stays semantically "this is where canopy was lost"
-      // rather than a generic change-heatmap.
+      // All land hexes paint as the pale-yellow backdrop; hexes whose
+      // dominant cluster is in GROUP_OF (paper's 18 chip-mapped
+      // clusters) paint the coloured deforestation layer on top.
       const hasH3 = typeof window.h3 !== 'undefined';
       const useFine = zoom >= HEX_FINE_SWITCH;
       if (useFine && window._ensureFineHexes) window._ensureFineHexes();
@@ -737,27 +708,13 @@
       let hexSource;
       let rankFn;
       if (useFine && fine && fine.length) {
-        // Sarawak-only clip applied to all tags (the scan bbox spills
-        // into Brunei, Sabah, and Indonesian Kalimantan — those need
-        // to be excluded from both display and counting).  v1-era
-        // OCEAN_CLUSTERS + elev_m filters dropped (wrong for v3).
-        hexSource = fine.filter(h => {
-          if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
-          return h._inSarawak !== false;     // cached at load
-        });
-        // Rank is computed per-frame against the viewport-visible subset
-        // (see hexPolys block below), so the colour ramp re-spans 0-1 at
-        // every zoom. The previous global rank made every visible hex
-        // peg at the deep-red end whenever the viewport was a dense
-        // sub-region of the full ~30K hex set.
+        // Sarawak-only clip drops Brunei/Sabah/Kalimantan spillover.
+        hexSource = fine.filter(h => h._inSarawak !== false);
+        // Rank computed per-frame against the viewport-visible subset.
         rankFn = null;   // placeholder — assigned after hexPolys is built
       } else {
-        // Coarse zoom — Sarawak-only clip on every tag, same as fine.
         const coarse = window.SARAWAK_HEXES_COARSE || [];
-        hexSource = coarse.filter(h => {
-          if (h.tag !== 'deforest' && h.tag !== 'empty' && h.tag !== 'mixed') return false;
-          return h._inSarawak !== false;     // cached at load
-        });
+        hexSource = coarse.filter(h => h._inSarawak !== false);
         rankFn = null;   // viewport-relative rank assigned below
       }
       const hexDensityColor = window.hexDensityColor || ((t) => '#c67b2f');
@@ -788,12 +745,12 @@
         }
         hexPolys.push({ p, poly });
       }
-      // If using the fine source (rankFn === null), rank ONLY the
-      // colored deforest hexes that are in-viewport. The empty backdrop
-      // hexes don't enter the ranking — they only paint as the pale fill.
+      // Rank ONLY the colored chip-mapped hexes that are in-viewport.
+      // The backdrop-only hexes (not in any chip group) don't enter
+      // the ranking — they paint only as the pale fill.
       if (rankFn === null) {
         const colored = hexPolys
-          .filter(({ p }) => p.tag === 'deforest')
+          .filter(({ p }) => p.cluster_id in GROUP_OF)
           .map(({ p }) => p);
         const sorted = colored.slice().sort((a, b) => (a.n||0) - (b.n||0));
         const rankOf = new Map();
@@ -807,20 +764,17 @@
         for (let j = 1; j < poly.length; j++) ctx.lineTo(poly[j][0], poly[j][1]);
         ctx.closePath();
       };
-      // Pass 1 — pale-yellow backdrop for every land hex (empty / mixed
-      // / deforest). Solid fill at 0.35 alpha — strong enough to read
-      // as continuous land coverage so inland gaps look like "scan
-      // covered, no detection here" instead of "missing data". No
-      // stroke (the previous 0.32-stroke version made the grid pop
-      // visually and competed with the deforest paint).
+      // Pass 1 — pale-yellow backdrop for every land hex. Solid fill at
+      // 0.35 alpha so inland gaps read as "scan covered, no detection
+      // here" instead of "missing data".
       ctx.fillStyle = BACKDROP_COLOR;
       ctx.globalAlpha = 0.35;
       for (const { poly } of hexPolys) { drawPoly(poly); ctx.fill(); }
       ctx.globalAlpha = 1;
-      // Pass 2 — year-filtered coloured paint on top. Skip
-      // backdrop-only hexes (empty / mixed) and year-out-of-range hexes.
+      // Pass 2 — year-filtered coloured paint on top. Skip hexes whose
+      // dominant cluster isn't a chip cluster, and year-out-of-range hexes.
       for (const { p, poly } of hexPolys) {
-        if (p.tag === 'empty' || p.tag === 'mixed') continue;
+        if (!(p.cluster_id in GROUP_OF)) continue;
         if (p.y != null && (p.y < yr0 || p.y > yr1)) continue;
         const t = rankFn(p);
         const color = p.color || hexDensityColor(t);
