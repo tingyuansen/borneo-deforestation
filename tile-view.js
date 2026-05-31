@@ -288,12 +288,19 @@
         const year = h.y;
         const row = hist[year];
         if (row == null) continue;
-        // Use the exact per-chip pixel counts in each hex; each pixel
-        // is attributed to its own cluster's chip group at hex-build
-        // time (analysis/pipeline/08_rebuild_hexes.py).
-        if (h.n_canopy)        row.canopy        = (row.canopy        || 0) + h.n_canopy;
-        if (h.n_bare_soil)     row.bare_soil     = (row.bare_soil     || 0) + h.n_bare_soil;
-        if (h.n_wet_substrate) row.wet_substrate = (row.wet_substrate || 0) + h.n_wet_substrate;
+        if (h.n_canopy != null || h.n_bare_soil != null || h.n_wet_substrate != null) {
+          // Exact per-chip pixel counts (analysis/pipeline/08_rebuild_hexes.py).
+          if (h.n_canopy)        row.canopy        = (row.canopy        || 0) + h.n_canopy;
+          if (h.n_bare_soil)     row.bare_soil     = (row.bare_soil     || 0) + h.n_bare_soil;
+          if (h.n_wet_substrate) row.wet_substrate = (row.wet_substrate || 0) + h.n_wet_substrate;
+        } else {
+          // Old schema fallback: attribute hex's deforest_n to its dominant cluster's chip.
+          const nDef = h.deforest_n != null ? h.deforest_n : h.n;
+          if (nDef) {
+            const key = 'c' + h.cluster_id;
+            row[key] = (row[key] || 0) + nDef;
+          }
+        }
       }
       return hist;
     }
