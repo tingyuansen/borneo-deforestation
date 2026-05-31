@@ -1087,8 +1087,9 @@ let globe;
 //   SARAWAK_HEXES_FINE    — H3 res 8 (~188k hexes, lazy at close zoom)
 //   .bin tiles (tile-view) — 643M per-pixel labels, 0.1°×0.1° streaming
 // Both hex files arrive pre-classified by 08_rebuild_hexes.py
-// (each hex carries cluster_id, tag, deforest_n already computed from
-// the full 643M map). CLUSTER_META turns cluster id → paint colour.
+// (each hex carries cluster_id + n_canopy / n_bare_soil /
+// n_wet_substrate already computed from the full 643M map).
+// CLUSTER_META turns cluster id → paint colour.
 let SARAWAK_HEXES_COARSE = null;
 let SARAWAK_HEXES_FINE   = null;
 let CLUSTER_META         = null;
@@ -1230,12 +1231,6 @@ function buildPoints() {
       bucket: 'sarawak',
       layer: 'hex',
       h3: h.h3, y: h.y, n: h.n, _rankT: t,
-      // Carry deforest_n so the tile-view's coarse-zoom (zoom < 10)
-      // viewport hist sums true deforest pixels rather than h.n (total,
-      // which folds in mixed + outliers and inflates the "In view"
-      // hectare readout).
-      deforest_n: h.deforest_n,
-      tag: h.tag,
       cluster_id: h.cluster_id,
     };
   });

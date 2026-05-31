@@ -215,7 +215,7 @@
   //   zoom ≥ PIXEL_SWITCH → iterate the in-cache .bin tiles at stride 16
   //                         (dense, accurate when the 48-tile LRU covers
   //                         the viewport — which it does at close zoom)
-  //   zoom <  PIXEL_SWITCH → sum hex.deforest_n across viewport-intersecting
+  //   zoom <  PIXEL_SWITCH → sum hex.n_<chip> across viewport-intersecting
   //                         hexes. The .bin path undercounts badly when
   //                         zoomed out across Sarawak (2000+ tiles in
   //                         view, only 48 cached → ~2% coverage), so we
@@ -246,10 +246,11 @@
     const keepCid = (cid) => cid !== 255 && (cid in GROUP_OF);
 
     if (zoom < HIST_PIXEL_SWITCH) {
-      // Hex aggregate path. Each hex carries deforest_n (exact) and a
-      // dominant cluster_id. Year is the hex-level median so the stack's
-      // time axis is smeared for hexes that span multiple years, but the
-      // TOTAL (what drives the "In view" hectare readout) is exact.
+      // Hex aggregate path. Each hex carries n_canopy / n_bare_soil /
+      // n_wet_substrate as exact per-pixel sums (one bucket per chip).
+      // Year is the hex-level median so the stack's time axis is
+      // smeared for hexes spanning multiple years, but the per-chip
+      // totals are exact.
       const fine = window.SARAWAK_HEXES_FINE;
       const useFine = zoom >= HIST_HEX_FINE_SWITCH && fine && fine.length;
       // Coarse-zoom path reads SARAWAK_HEXES_COARSE directly (not the
