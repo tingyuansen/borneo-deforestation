@@ -142,17 +142,19 @@
   // GitHub LFS path (media.githubusercontent.com/media/...) which had
   // wildly variable TTFB and was the main source of "blank tiles look
   // like no data here" complaints.
-  const DATA_BASE = (typeof window !== 'undefined' && window.DATA_BASE)
-    || 'https://storage.googleapis.com/borneo-deforestation-data/data/';
-  const BIN_BASE     = DATA_BASE + 'tiles/';
-  const MANIFEST_URL = BIN_BASE + 'manifest.json';
+  // Resolve lazily at fetch time. window.DATA_BASE is set by index.html AFTER
+  // this script loads, so capturing it at module-load time would miss it and
+  // fall back to GCS. Default to the local (Worker-served) 'data/' folder.
+  const dataBase    = () => ((typeof window !== 'undefined' && window.DATA_BASE) || 'data/');
+  const binBase     = () => dataBase() + 'tiles/';
+  const manifestUrl = () => binBase() + 'manifest.json';
   let   binManifest     = null;                 // { tiles: { iy_ix: {...} } }
   const binCache        = new Map();            // key → { dx, dy, yr, n, lonMin, latMin }
   const binFetching     = new Set();
 
   function loadBinManifest() {
     if (binManifest || loadBinManifest._pending) return loadBinManifest._pending;
-    loadBinManifest._pending = fetch(MANIFEST_URL)
+    loadBinManifest._pending = fetch(manifestUrl())
       .then(r => r.ok ? r.json() : null)
       .then(m => { binManifest = m; draw(); return m; })
       .catch(e => { console.warn('[tile-bin] manifest failed', e); return null; });
@@ -169,7 +171,7 @@
     if (binFetching.has(key)) return null;
     if (!binManifest || !binManifest.tiles || !binManifest.tiles[key]) return null;
     binFetching.add(key);
-    fetch(`${BIN_BASE}tile_${key}.bin`)
+    fetch(`${binBase()}tile_${key}.bin`)
       .then(r => r.ok ? r.arrayBuffer() : Promise.reject('http ' + r.status))
       .then(buf => {
         const dv = new DataView(buf);
