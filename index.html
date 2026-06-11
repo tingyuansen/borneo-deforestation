@@ -1175,12 +1175,12 @@ Promise.all([
 
 // Lazy loader for the fine hex layer. Called from the tile-view render
 // loop once zoom crosses the threshold where res 8 detail is worth the
-// ~16 MB fetch.
+// ~8 MB gzipped fetch, decompressed in-browser via DecompressionStream (Cloudflare 25 MiB/file cap).
 let _finePending = null;
 function ensureFineHexes() {
   if (window.SARAWAK_HEXES_FINE || _finePending) return _finePending;
-  _finePending = fetch(P('sarawak_hexes_res8.json'))
-    .then(r => r.json()).then(x => {
+  _finePending = fetch(P('sarawak_hexes_res8.json.gz'))
+    .then(r => new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).json()).then(x => {
       tagHexesInSarawak(x);                  // see boot path comment above
       SARAWAK_HEXES_FINE = x;
       window.SARAWAK_HEXES_FINE = x;
