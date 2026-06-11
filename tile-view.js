@@ -565,6 +565,7 @@
     });
   }
   function _draw() {
+    if (!ctx) return;   // canvas not initialised yet (tile view not opened) — skip; a draw() after setup() will render
     ctx.clearRect(0, 0, W, H);
 
     // Integer zoom level for tiles (use floor; fractional zoom = scale)
