@@ -146,7 +146,12 @@
   // this script loads, so capturing it at module-load time would miss it and
   // fall back to GCS. Default to the local (Worker-served) 'data/' folder.
   const dataBase    = () => ((typeof window !== 'undefined' && window.DATA_BASE) || 'data/');
-  const binBase     = () => dataBase() + 'tiles/';
+  const binBase     = () => {
+    const base = dataBase();
+    return base.includes('storage.googleapis.com/borneo-deforestation-data/')
+      ? base + 'tiles/2of3/'
+      : base + 'tiles/';
+  };
   const manifestUrl = () => binBase() + 'manifest.json';
   let   binManifest     = null;                 // { tiles: { iy_ix: {...} } }
   const binCache        = new Map();            // key → { dx, dy, yr, n, lonMin, latMin }
